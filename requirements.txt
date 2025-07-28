@@ -1,0 +1,10 @@
+transformers>=4.52.0
+torch>=2.6.0
+peft>=0.15.2
+torchvision
+pillow
+accelerate
+datasets
+sentence-transformers
+scikit-learn
+tqdm
