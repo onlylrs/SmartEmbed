@@ -232,7 +232,7 @@ $RECYCLE.BIN/
 
 # Data files
 data/
-datasets/
+/datasets/  # Only ignore datasets in root, not src/datasets/
 checkpoints/
 outputs/
 logs/
@@ -246,7 +246,7 @@ huggingface/
 # Training artifacts
 runs/
 experiments/
-models/
+/models/  # Only ignore models in root, not src/models/
 saved_models/
 
 # Jupyter notebook outputs
