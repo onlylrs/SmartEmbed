@@ -4,11 +4,16 @@ Training script for Jina Embeddings V4 model
 """
 
 import os
+import sys
 import json
 import logging
 import argparse
 from pathlib import Path
 from typing import Optional
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 import torch
 from transformers import (
@@ -20,7 +25,7 @@ from transformers import (
 # Import our modules
 from src.models.modeling_qwen2_5_vl import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
 from src.models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
-from src.models.training_config import JinaTrainingConfig
+from src.training.training_config import JinaTrainingConfig
 from src.trainer.jina_trainer import JinaEmbeddingTrainer, setup_model_for_training
 from src.datasets.jina_dataset import (
     load_training_data, 
@@ -48,7 +53,7 @@ def parse_args():
                        help="Format of data files")
     
     # Model arguments
-    parser.add_argument("--model_name_or_path", type=str, default="Qwen/Qwen2.5-VL-3B-Instruct",
+    parser.add_argument("--model_name_or_path", type=str, default="/homes/rliuar/Desktop/FYP/jina-embedding-v4",
                        help="Model name or path")
     parser.add_argument("--config_file", type=str, help="Path to training config file")
     
@@ -195,64 +200,74 @@ def main():
     logger.info("Loading model and processor...")
     
     try:
-        # Try to load as Jina model first
+        # Load Jina Embeddings V4 model from local path
+        logger.info(f"Loading Jina model from: {config.model_name_or_path}")
         model = JinaEmbeddingsV4Model.from_pretrained(
             config.model_name_or_path,
             torch_dtype="auto",
             trust_remote_code=config.trust_remote_code,
         )
-        logger.info("Loaded Jina Embeddings V4 model")
-    except Exception as e:
-        logger.info(f"Could not load as Jina model: {e}")
-        logger.info("Setting up base model for training...")
+        logger.info("Successfully loaded Jina Embeddings V4 model")
         
-        # Create model config
-        model_config = JinaEmbeddingsV4Config(
-            single_vector_pool_strategy=config.single_vector_pool_strategy,
-            multi_vector_projector_dim=config.multi_vector_projector_dim,
-            task_names=config.task_names,
-            matryoshka_dims=config.matryoshka_dims,
-        )
+        # Enable gradient checkpointing if configured
+        if hasattr(config, 'gradient_checkpointing') and config.gradient_checkpointing:
+            model.gradient_checkpointing_enable()
+            logger.info("Gradient checkpointing enabled")
         
-        # Setup model for training
-        model = setup_model_for_training(config)
-    
-    # Load processor/tokenizer
-    try:
+        # Set model to use less memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()  # Clear GPU cache
+            logger.info("Cleared GPU cache")
+        
+        # Apply LoRA if configured
+        if config.use_lora:
+            logger.info("Setting up LoRA adapters...")
+            model = setup_model_for_training(config, processor.tokenizer)
+            logger.info("LoRA adapters successfully applied")
+        else:
+            # If not using LoRA, manually enable gradients for specific layers
+            logger.info("Setting up model for full fine-tuning...")
+            # Enable gradients for projection layers
+            for name, param in model.named_parameters():
+                if any(keyword in name.lower() for keyword in ['projector', 'embed', 'layer_norm']):
+                    param.requires_grad = True
+                    logger.info(f"Enabled gradients for: {name}")
+        
+        # Force enable gradients for projection layers regardless of LoRA
+        projection_layers = ['multi_vector_projector', 'single_vector_projector']
+        for name, param in model.named_parameters():
+            if any(proj_name in name for proj_name in projection_layers):
+                param.requires_grad = True
+                logger.info(f"Force enabled gradients for projection layer: {name}")
+        
+        # Log trainable parameters
+        total_params = sum(p.numel() for p in model.parameters())
+        actual_trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        logger.info(f"Total parameters: {total_params:,}")
+        logger.info(f"Trainable parameters: {actual_trainable_params:,}")
+        logger.info(f"Trainable percentage: {100 * actual_trainable_params / total_params:.2f}%")
+        
+        # Print details of trainable parameters
+        logger.info("Trainable parameter breakdown:")
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                logger.info(f"  {name}: {param.numel():,} parameters")
+        
+        # Verify that we have trainable parameters
+        if actual_trainable_params == 0:
+            logger.error("No trainable parameters found! This will cause gradient errors.")
+            raise ValueError("No trainable parameters found. Check LoRA configuration.")
+        
+        # Load processor
         processor = JinaEmbeddingsV4Processor.from_pretrained(
             config.model_name_or_path,
             trust_remote_code=config.trust_remote_code,
         )
-        logger.info("Loaded Jina processor")
-    except Exception as e:
-        logger.warning(f"Could not load Jina processor: {e}")
-        logger.info("Using AutoTokenizer as fallback...")
-        tokenizer = AutoTokenizer.from_pretrained(
-            config.model_name_or_path,
-            trust_remote_code=config.trust_remote_code,
-        )
-        # Create a mock processor for now
-        class MockProcessor:
-            def __init__(self, tokenizer):
-                self.tokenizer = tokenizer
-                self.text_max_length = config.max_seq_length
-                
-            def process_texts(self, texts, max_length=None, prefix=None, padding="longest"):
-                if prefix:
-                    texts = [f"{prefix}: {text}" for text in texts]
-                return self.tokenizer(
-                    texts,
-                    max_length=max_length or self.text_max_length,
-                    padding=padding,
-                    truncation=True,
-                    return_tensors="pt"
-                )
-                
-            def process_images(self, images):
-                # Mock image processing - return text-only inputs
-                return self.process_texts(["Image content"] * len(images))
+        logger.info("Successfully loaded Jina processor")
         
-        processor = MockProcessor(tokenizer)
+    except Exception as e:
+        logger.error(f"Failed to load Jina model: {e}")
+        raise e
     
     # Create datasets and dataloaders
     logger.info("Creating datasets...")
@@ -284,13 +299,14 @@ def main():
         warmup_steps=config.warmup_steps,
         logging_strategy=config.logging_strategy,
         logging_steps=config.logging_steps,
-        evaluation_strategy=config.evaluation_strategy if eval_examples else "no",
+        eval_strategy=config.evaluation_strategy if eval_examples else "no",
         eval_steps=config.eval_steps,
         save_strategy=config.save_strategy,
         save_steps=config.save_steps,
         save_total_limit=config.save_total_limit,
         dataloader_num_workers=config.dataloader_num_workers,
         dataloader_pin_memory=config.dataloader_pin_memory,
+        dataloader_drop_last=getattr(config, 'dataloader_drop_last', True),
         bf16=config.bf16,
         fp16=config.fp16,
         tf32=config.tf32,
@@ -302,6 +318,8 @@ def main():
         logging_dir=config.logging_dir,
         resume_from_checkpoint=config.resume_from_checkpoint,
         ignore_data_skip=config.ignore_data_skip,
+        gradient_checkpointing=getattr(config, 'gradient_checkpointing', True),
+        ddp_find_unused_parameters=getattr(config, 'ddp_find_unused_parameters', False),
     )
     
     # Create trainer

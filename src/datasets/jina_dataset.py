@@ -264,18 +264,30 @@ class JinaContrastiveDataset(Dataset):
         else:
             positive_inputs = self.processor.process_texts([positive_text], max_length=self.max_length)
         
-        # Combine inputs
-        combined_inputs = {}
-        for key in query_inputs.keys():
-            if key in positive_inputs:
-                combined_inputs[key] = torch.cat([query_inputs[key], positive_inputs[key]], dim=0)
-            else:
-                combined_inputs[key] = query_inputs[key]
+        # Remove batch dimension from inputs
+        query_inputs = {k: v.squeeze(0) if v.dim() > 1 else v for k, v in query_inputs.items()}
+        positive_inputs = {k: v.squeeze(0) if v.dim() > 1 else v for k, v in positive_inputs.items()}
         
-        # Add task label
-        combined_inputs["task_labels"] = [example.task, example.task]
+        # Return separate inputs instead of concatenating
+        # The data collator will handle batching properly
+        result = {
+            'query_input_ids': query_inputs.get('input_ids'),
+            'query_attention_mask': query_inputs.get('attention_mask'),
+            'positive_input_ids': positive_inputs.get('input_ids'),
+            'positive_attention_mask': positive_inputs.get('attention_mask'),
+            'task_labels': example.task,
+        }
         
-        return combined_inputs
+        # Add other keys if present
+        for key in query_inputs:
+            if key not in ['input_ids', 'attention_mask']:
+                result[f'query_{key}'] = query_inputs[key]
+        
+        for key in positive_inputs:
+            if key not in ['input_ids', 'attention_mask']:
+                result[f'positive_{key}'] = positive_inputs[key]
+        
+        return result
 
 
 def load_training_data(
