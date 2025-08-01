@@ -576,47 +576,34 @@ class JinaEmbeddingsV4Model(Qwen2_5_VLForConditionalGeneration):
             pretrained_model_name_or_path, *args, **kwargs
         )
 
-        # Initialize processor after model creation
-        base_model.processor = JinaEmbeddingsV4Processor.from_pretrained(
-            pretrained_model_name_or_path, trust_remote_code=True, use_fast=True
+        # Configure adapter directory
+        if os.path.isdir(base_model.name_or_path):
+            adapter_dir = os.path.join(base_model.name_or_path, "adapters")
+        else:
+            adapter_cache_path = snapshot_download(
+                repo_id=base_model.name_or_path, allow_patterns=["adapters/*"]
+            )
+            adapter_dir = os.path.join(adapter_cache_path, "adapters")
+
+        lora_config = LoraConfig.from_pretrained(adapter_dir)
+        lora_config._custom_modules = {
+            torch.nn.modules.linear.Linear: partial(
+                MultiAdapterLinear,
+                task_names=base_model.config.task_names,
+            )
+        }
+        peft_model = PeftModel.from_pretrained(
+            model=base_model,
+            model_id=adapter_dir,
+            config=lora_config,
         )
 
-        # Configure adapter directory if adapters exist
-        adapter_dir = None
-        if os.path.isdir(pretrained_model_name_or_path):
-            potential_adapter_dir = os.path.join(pretrained_model_name_or_path, "adapters")
-            if os.path.exists(potential_adapter_dir):
-                adapter_dir = potential_adapter_dir
-        else:
-            try:
-                adapter_cache_path = snapshot_download(
-                    repo_id=pretrained_model_name_or_path, allow_patterns=["adapters/*"]
-                )
-                adapter_dir = os.path.join(adapter_cache_path, "adapters")
-            except:
-                pass  # No adapters available
+        def task_getter(self):
+            return self.model.task
 
-        if adapter_dir and os.path.exists(adapter_dir):
-            lora_config = LoraConfig.from_pretrained(adapter_dir)
-            lora_config._custom_modules = {
-                torch.nn.modules.linear.Linear: partial(
-                    MultiAdapterLinear,
-                    task_names=base_model.config.task_names,
-                )
-            }
-            peft_model = PeftModel.from_pretrained(
-                model=base_model,
-                model_id=adapter_dir,
-                config=lora_config,
-            )
+        def task_setter(self, value):
+            self.model.task = value
 
-            def task_getter(self):
-                return self.model.task
+        peft_model.__class__.task = property(task_getter, task_setter)
 
-            def task_setter(self, value):
-                self.model.task = value
-
-            peft_model.__class__.task = property(task_getter, task_setter)
-            return peft_model
-
-        return base_model
+        return peft_model
