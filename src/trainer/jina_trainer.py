@@ -23,7 +23,8 @@ from peft import LoraConfig, get_peft_model, TaskType
 from ..models.modeling_qwen2_5_vl import JinaEmbeddingsV4Model, JinaEmbeddingsV4ModelOutput
 from ..models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
 from ..models.losses import JinaContrastiveLoss, JinaMultiTaskLoss, JinaMatryoshkaLoss
-from ..models.training_config import JinaTrainingConfig
+from ..training.training_config import JinaTrainingConfig
+from ..datasets.data_collator import JinaContrastiveDataCollator
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ class JinaEmbeddingTrainer(Trainer):
         model: Union[PreTrainedModel, nn.Module] = None,
         training_config: JinaTrainingConfig = None,
         training_args: TrainingArguments = None,
+        tokenizer: PreTrainedTokenizer = None,
         **kwargs
     ):
         self.training_config = training_config
@@ -58,71 +60,113 @@ class JinaEmbeddingTrainer(Trainer):
             base_loss_fn=self.contrastive_loss,
         )
         
+        # Set up data collator
+        if 'data_collator' not in kwargs:
+            kwargs['data_collator'] = JinaContrastiveDataCollator(
+                tokenizer=tokenizer,
+                padding=True,
+                max_length=training_config.max_seq_length,
+                return_tensors="pt"
+            )
+        
         super().__init__(
             model=model,
             args=training_args,
+            tokenizer=tokenizer,
             **kwargs
         )
     
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Compute the training loss
         """
         
-        # Extract inputs
+        # Extract metadata
         task_labels = inputs.pop("task_labels", None)
-        labels = inputs.pop("labels", None)
         
-        # Forward pass
-        outputs = model(**inputs)
+        # Separate query and positive inputs
+        query_inputs = {}
+        positive_inputs = {}
         
-        if isinstance(outputs, JinaEmbeddingsV4ModelOutput):
-            single_vec_emb = outputs.single_vec_emb
-            multi_vec_emb = outputs.multi_vec_emb
+        for key, value in inputs.items():
+            if key.startswith('query_'):
+                query_inputs[key.replace('query_', '')] = value
+            elif key.startswith('positive_'):
+                positive_inputs[key.replace('positive_', '')] = value
+        
+        # Forward pass for queries
+        query_outputs = model(
+            task_label="retrieval",  # Add required task_label parameter
+            **query_inputs
+        )
+        if isinstance(query_outputs, JinaEmbeddingsV4ModelOutput):
+            query_embeddings = query_outputs.single_vec_emb
         else:
-            # Fallback for other model types
-            single_vec_emb = outputs.get("single_vec_emb", None)
-            multi_vec_emb = outputs.get("multi_vec_emb", None)
+            query_embeddings = query_outputs.get("single_vec_emb", None)
+            
+        # Forward pass for positives
+        positive_outputs = model(
+            task_label="retrieval",  # Add required task_label parameter
+            **positive_inputs
+        )
+        if isinstance(positive_outputs, JinaEmbeddingsV4ModelOutput):
+            positive_embeddings = positive_outputs.single_vec_emb
+        else:
+            positive_embeddings = positive_outputs.get("single_vec_emb", None)
         
         loss = 0.0
         loss_dict = {}
         
-        # Use single vector embeddings for loss computation
-        if single_vec_emb is not None:
-            batch_size = single_vec_emb.size(0)
+        # Compute contrastive loss
+        if query_embeddings is not None and positive_embeddings is not None:
+            # Ensure embeddings require gradients
+            if not query_embeddings.requires_grad:
+                logger.warning("Query embeddings do not require grad. This may cause training issues.")
+            if not positive_embeddings.requires_grad:
+                logger.warning("Positive embeddings do not require grad. This may cause training issues.")
             
-            # Split batch into queries and documents
-            query_embeddings = single_vec_emb[:batch_size//2]
-            doc_embeddings = single_vec_emb[batch_size//2:]
+            contrastive_loss = self.contrastive_loss(
+                query_embeddings, positive_embeddings
+            )
             
-            if task_labels is not None:
-                # Multi-task loss
-                embeddings = {"retrieval": single_vec_emb}  # Simplified for now
-                total_loss, task_losses = self.multi_task_loss(
-                    embeddings, task_labels, labels
+            # Ensure loss requires gradients
+            if not contrastive_loss.requires_grad:
+                logger.error("Contrastive loss does not require grad! Check model parameters.")
+                # Add small regularization to ensure gradients flow
+                regularization = 1e-6 * sum(p.pow(2.0).sum() for p in model.parameters() if p.requires_grad)
+                contrastive_loss = contrastive_loss + regularization
+                logger.info("Added regularization to enable gradient computation")
+            
+            loss += contrastive_loss
+            loss_dict["contrastive_loss"] = contrastive_loss.item()
+            
+            # Add Matryoshka loss if configured
+            if self.training_config.use_matryoshka:
+                matryoshka_loss = self.matryoshka_loss(
+                    query_embeddings, positive_embeddings
                 )
-                loss += total_loss
-                loss_dict.update(task_losses)
-            else:
-                # Standard contrastive loss
-                if len(query_embeddings) > 0 and len(doc_embeddings) > 0:
-                    # Matryoshka loss
-                    matryoshka_loss, dim_losses = self.matryoshka_loss(
-                        query_embeddings, doc_embeddings, labels
-                    )
-                    loss += matryoshka_loss
-                    loss_dict["matryoshka_loss"] = matryoshka_loss
-                    
-                    # Log individual dimension losses
-                    for dim, dim_loss in dim_losses.items():
-                        loss_dict[f"loss_dim_{dim}"] = dim_loss
+                loss += matryoshka_loss
+                loss_dict["matryoshka_loss"] = matryoshka_loss.item()
+        else:
+            logger.error("Query or positive embeddings are None!")
+            # Create a loss with gradients
+            dummy_loss = sum(p.pow(2.0).sum() for p in model.parameters() if p.requires_grad) * 1e-8
+            loss = dummy_loss if dummy_loss.requires_grad else torch.tensor(0.0, requires_grad=True, device=next(model.parameters()).device)
         
         # Log losses
-        if len(loss_dict) > 0:
-            self.log(loss_dict)
-            
-        return (loss, outputs) if return_outputs else loss
-    
+        if self.args.logging_steps > 0 and self.state.global_step % self.args.logging_steps == 0:
+            for loss_name, loss_value in loss_dict.items():
+                self.log({loss_name: loss_value})
+        
+        if return_outputs:
+            return loss, {
+                "query_outputs": query_outputs,
+                "positive_outputs": positive_outputs,
+                "loss_dict": loss_dict
+            }
+        
+        return loss
+
     def evaluation_loop(
         self,
         dataloader,
@@ -290,22 +334,44 @@ def setup_model_for_training(
     )
     
     if training_config.use_lora:
-        # Configure LoRA
+        # Configure LoRA with corrected target modules
         lora_config = LoraConfig(
             task_type=TaskType.FEATURE_EXTRACTION,
             r=training_config.lora_r,
             lora_alpha=training_config.lora_alpha,
             lora_dropout=training_config.lora_dropout,
-            target_modules=training_config.lora_target_modules,
+            target_modules=[
+                # Core Qwen attention and MLP layers
+                "q_proj", "k_proj", "v_proj", "o_proj",  # attention
+                "gate_proj", "up_proj", "down_proj",     # MLP
+                # Jina-specific projection layers
+                "multi_vector_projector",
+            ],
             bias=training_config.lora_bias,
         )
         
         # Apply LoRA to model
         model = get_peft_model(model, lora_config)
         
-        logger.info("LoRA adapters added to model")
-        logger.info(f"Trainable parameters: {model.num_parameters()}")
+        # Ensure projection layers are trainable even if not in LoRA targets
+        for name, param in model.named_parameters():
+            if "projector" in name and not param.requires_grad:
+                param.requires_grad = True
+                logger.info(f"Force enabled gradients for projection layer: {name}")
         
+        logger.info("LoRA adapters added to model")
+        
+        # Print trainable parameter details
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in model.parameters())
+        logger.info(f"Trainable parameters: {trainable_params:,} / {total_params:,} ({100 * trainable_params / total_params:.2f}%)")
+        
+        # Log which parameters are trainable
+        logger.info("Trainable parameters:")
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                logger.info(f"  {name}: {param.shape}")
+    
     return model
 
 

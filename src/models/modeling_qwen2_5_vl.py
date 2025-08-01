@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import BatchFeature
 from transformers.utils import is_flash_attn_2_available
+from transformers.modeling_outputs import ModelOutput
 
 from .configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
 from .custom_lora_module import MultiAdapterLinear
@@ -120,7 +121,7 @@ class JinaEmbeddingsV4Processor(Qwen2_5_VLProcessor):
 
 
 @dataclass
-class JinaEmbeddingsV4ModelOutput:
+class JinaEmbeddingsV4ModelOutput(ModelOutput):
     """
     Base class for the Hybrid Model outputs.
     Args:
