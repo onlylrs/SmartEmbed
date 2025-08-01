@@ -239,6 +239,12 @@ logs/
 wandb/
 tensorboard_logs/
 
+# Training data files
+*.jsonl
+*.csv
+captions.txt
+images/
+
 # Hugging Face cache
 .cache/
 huggingface/
