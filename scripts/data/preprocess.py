@@ -1,3 +1,4 @@
+# 数据预处理：将标准数据集转换为对比学习格式，分别处理 img txt，输出标准化jsonl文件
 import json
 import os
 from tqdm import tqdm
