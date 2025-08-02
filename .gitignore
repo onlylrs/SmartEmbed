@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files (don't commit large datasets)
+/data0
+*.jsonl
+*.csv
+images/
+
+# Model files (don't commit large trained models)
+*.bin
+*.pt
+*.pth
+*.onnx
+*.h5
+*.pkl
+*.pickle
+
+# Training artifacts
+checkpoints/
+outputs/
+results/
+runs/
+logs/
+wandb/
+
+# Cache
+.cache/
+huggingface/
+
+# Temporary files
+tmp/
+temp/
+*.log
+*.out
+*.err

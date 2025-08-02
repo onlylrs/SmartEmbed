@@ -8,3 +8,10 @@ datasets
 sentence-transformers
 scikit-learn
 tqdm
+numpy
+pandas
+requests
+huggingface_hub
+flash-attn>=2.0.0
+wandb
+tensorboard
