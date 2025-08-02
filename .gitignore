@@ -51,3 +51,5 @@ temp/
 *.log
 *.out
 *.err
+
+config.yaml

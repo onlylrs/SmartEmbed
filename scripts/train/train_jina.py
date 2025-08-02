@@ -10,6 +10,7 @@ import logging
 import argparse
 from pathlib import Path
 from typing import Optional
+import yaml
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent.parent
@@ -82,7 +83,13 @@ def parse_args():
 
 def load_config(args) -> JinaTrainingConfig:
     """Load training configuration"""
-    
+    # Load config from yaml
+    config_path = os.path.join(project_root, 'config.yaml')
+    if not os.path.exists(config_path):
+        raise ValueError("config.yaml not found. Please copy config.yaml.example and modify it.")
+    with open(config_path, 'r') as f:
+        yaml_config = yaml.safe_load(f)
+
     if args.config_file and os.path.exists(args.config_file):
         with open(args.config_file, 'r') as f:
             config_dict = json.load(f)
@@ -91,7 +98,7 @@ def load_config(args) -> JinaTrainingConfig:
         config = JinaTrainingConfig()
     
     # Override with command line arguments
-    config.model_name_or_path = args.model_name_or_path
+    config.model_name_or_path = yaml_config.get('model_path', config.model_name_or_path)
     config.output_dir = args.output_dir
     config.num_train_epochs = args.num_train_epochs
     config.per_device_train_batch_size = args.per_device_train_batch_size
@@ -206,6 +213,7 @@ def main():
             config.model_name_or_path,
             torch_dtype="auto",
             trust_remote_code=config.trust_remote_code,
+            local_files_only=True
         )
         logger.info("Successfully loaded Jina Embeddings V4 model")
         
@@ -262,6 +270,7 @@ def main():
         processor = JinaEmbeddingsV4Processor.from_pretrained(
             config.model_name_or_path,
             trust_remote_code=config.trust_remote_code,
+            local_files_only=True
         )
         logger.info("Successfully loaded Jina processor")
         
@@ -289,6 +298,7 @@ def main():
         per_device_eval_batch_size=config.per_device_eval_batch_size,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         learning_rate=config.learning_rate,
+        max_steps=100,
         weight_decay=config.weight_decay,
         adam_beta1=config.adam_beta1,
         adam_beta2=config.adam_beta2,
@@ -302,8 +312,10 @@ def main():
         eval_strategy=config.evaluation_strategy if eval_examples else "no",
         eval_steps=config.eval_steps,
         save_strategy=config.save_strategy,
-        save_steps=config.save_steps,
-        save_total_limit=config.save_total_limit,
+
+        #下面两个先hardcode防止result太多超过内存限制
+        save_steps=10,
+        save_total_limit=1,
         dataloader_num_workers=config.dataloader_num_workers,
         dataloader_pin_memory=config.dataloader_pin_memory,
         dataloader_drop_last=getattr(config, 'dataloader_drop_last', True),
