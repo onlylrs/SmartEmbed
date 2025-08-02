@@ -125,12 +125,18 @@ class JinaEmbeddingsV4ModelOutput(ModelOutput):
     """
     Base class for the Hybrid Model outputs.
     Args:
-        vlm_last_hidden_states (torch.Tensor, optional): Last hidden states of the VLM.
-        single_vec_emb (torch.Tensor, optional): Single-vector embeddings.
-        multi_vec_emb (torch.Tensor, optional): Multi-vector embeddings.
+        loss (`torch.FloatTensor` of shape `(1,)`, *optional*):
+            Matryoshka loss during training.
+        vlm_last_hidden_states (`torch.Tensor`, *optional*):
+            Last hidden states of the VLM.
+        single_vec_emb (`torch.Tensor`, *optional*):
+            Single-vector embeddings.
+        multi_vec_emb (`torch.Tensor`, *optional*):
+            Multi-vector embeddings.
     """
 
-    vlm_last_hidden_states: Optional[torch.Tensor] = None
+    loss: Optional[torch.FloatTensor] = None
+    vlm_last_hidden_states: Optional[torch.Tensor] = None 
     single_vec_emb: Optional[torch.Tensor] = None
     multi_vec_emb: Optional[torch.Tensor] = None
 
@@ -149,6 +155,15 @@ class JinaEmbeddingsV4Model(Qwen2_5_VLForConditionalGeneration):
         self.multi_vector_projector_dim = config.multi_vector_projector_dim
         self.verbosity = config.verbosity
         self._task = None
+
+        self.matryoshka_loss = JinaMatryoshkaLoss(
+            matryoshka_dims=config.matryoshka_dims,
+            matryoshka_weights=config.matryoshka_weights,
+            base_loss_fn=JinaContrastiveLoss(
+                temperature=config.temperature,
+                margin=config.margin
+            )
+        )
 
     @property
     def task(self) -> Optional[str]:
@@ -284,23 +299,40 @@ class JinaEmbeddingsV4Model(Qwen2_5_VLForConditionalGeneration):
             attention_mask (torch.Tensor): The attention mask tensor.
         Returns:
             JinaEmbeddingsV4ModelOutput:
+                loss (torch.FloatTensor, optional): Matryoshka loss during training.
                 vlm_last_hidden_states (torch.Tensor, optional): Last hidden states of the VLM.
                 single_vec_emb (torch.Tensor, optional): Single-vector embeddings.
                 multi_vec_emb (torch.Tensor, optional): Multi-vector embeddings.
         """
-        # Forward pass through the VLM
+        # Get base embeddings
         hidden_states = self.get_last_hidden_states(
             input_ids=input_ids,
             attention_mask=attention_mask,
             task_label=task_label,
             **kwargs,
-        )  # (batch_size, seq_length, hidden_size)
-        # Compute the embeddings
+        )
+
+        # Split batch into query/document pairs
+        batch_size = hidden_states.shape[0] // 2
+        query_states = hidden_states[:batch_size]
+        doc_states = hidden_states[batch_size:]
+
+        # Get matryoshka loss if training
+        total_loss = None
+        if self.training and self.config.use_matryoshka:
+            total_loss, _ = self.matryoshka_loss(
+                query_states, 
+                doc_states,
+                labels=torch.arange(batch_size, device=hidden_states.device)
+            )
+
+        # Get regular embeddings
         single_vec_emb = self.get_single_vector_embeddings(
             hidden_states=hidden_states,
             attention_mask=attention_mask,
             input_ids=input_ids,
         )
+        
         multi_vec_emb = self.get_multi_vector_embeddings(
             hidden_states=hidden_states,
             attention_mask=attention_mask,
@@ -308,9 +340,8 @@ class JinaEmbeddingsV4Model(Qwen2_5_VLForConditionalGeneration):
         )
 
         return JinaEmbeddingsV4ModelOutput(
-            vlm_last_hidden_states=(
-                hidden_states if output_vlm_last_hidden_states else None
-            ),
+            loss=total_loss,
+            vlm_last_hidden_states=(hidden_states if output_vlm_last_hidden_states else None),
             single_vec_emb=single_vec_emb,
             multi_vec_emb=multi_vec_emb,
         )
@@ -590,14 +621,14 @@ class JinaEmbeddingsV4Model(Qwen2_5_VLForConditionalGeneration):
         lora_config._custom_modules = {
             torch.nn.modules.linear.Linear: partial(
                 MultiAdapterLinear,
-                task_names=base_model.config.task_names,
-            )
-        }
-        peft_model = PeftModel.from_pretrained(
-            model=base_model,
-            model_id=adapter_dir,
-            config=lora_config,
-        )
+
+
+
+
+
+
+
+            config=lora_config,            model_id=adapter_dir,            model=base_model,        peft_model = PeftModel.from_pretrained(        }            )                task_names=base_model.config.task_names,        )
 
         def task_getter(self):
             return self.model.task

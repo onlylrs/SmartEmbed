@@ -1,5 +1,5 @@
 {
-  "model_name_or_path": "/homes/rliuar/Desktop/FYP/jina-embedding-v4",
+  "model_name_or_path": "/homes/rgongac/Desktop/FYP/SmartEmbed",
   "output_dir": "./results/jina_embeddings_v4",
   "overwrite_output_dir": true,
   "do_train": true,
@@ -38,7 +38,9 @@
   "task_names": ["retrieval", "text-matching", "code"],
   "single_vector_pool_strategy": "mean",
   "multi_vector_projector_dim": 128,
-  "use_matryoshka": false,
+  "use_matryoshka": true,
+  "matryoshka_dims": [128, 256, 512, 1024],
+  "matryoshka_weights": [1.0, 1.0, 1.0, 1.0],
   "gradient_checkpointing": true,
   
   "temperature": 0.02,
