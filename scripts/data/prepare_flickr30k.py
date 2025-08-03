@@ -21,10 +21,10 @@ def load_captions(captions_file: str) -> Dict[str, List[str]]:
         
         for row in reader:
             if len(row) >= 2:
-                image_name, caption = row[0], row[1]
+                image_name, caption = row[0].strip(), row[1].strip()
                 if image_name not in image_captions:
                     image_captions[image_name] = []
-                image_captions[image_name].append(caption.strip())
+                image_captions[image_name].append(caption)
     
     return image_captions
 
@@ -97,9 +97,9 @@ def save_jsonl(examples: List[Dict], output_file: str):
 
 def main():
     # Configuration
-    captions_file = "/homes/rliuar/Desktop/FYP/SmartEmbed/data/captions.txt"
-    images_dir = "/homes/rliuar/Desktop/FYP/SmartEmbed/data/images"  # Assume images are here
-    output_dir = "/homes/rliuar/Desktop/FYP/SmartEmbed/data"
+    captions_file = "/project/fyp25_hc2/data/captions.txt"
+    images_dir = "/project/fyp25_hc2/data/Images"  # Assume images are here
+    output_dir = "/project/fyp25_hc2/data"
     
     # Create output directory if not exists
     Path(output_dir).mkdir(parents=True, exist_ok=True)
