@@ -1,6 +1,6 @@
 {
-  "model_name_or_path": "/homes/rliuar/Desktop/FYP/jina-embedding-v4",
-  "output_dir": "./results/jina_embeddings_v4",
+  "model_name_or_path": "",
+  "output_dir": "/project/fyp25_hc2/results/jina_embeddings_v4",
   "overwrite_output_dir": true,
   "do_train": true,
   "do_eval": true,
@@ -15,18 +15,19 @@
   
   "lr_scheduler_type": "linear",
   "warmup_ratio": 0.1,
-  "evaluation_strategy": "steps",
+  "evaluation_strategy": "no",
   "eval_steps": 500,
   "logging_steps": 10,
+  "save_strategy": "epoch",
   "save_steps": 500,
-  "save_total_limit": 2,
+  "save_total_limit": 1,
   
   "max_seq_length": 256,
   "dataloader_num_workers": 0,
   
   "use_lora": true,
-  "lora_r": 32,
-  "lora_alpha": 32,
+  "lora_r": 16,
+  "lora_alpha": 16,
   "lora_dropout": 0.1,
   "lora_target_modules": [
     "q_proj", "k_proj", "v_proj", "o_proj",
@@ -53,5 +54,5 @@
   "trust_remote_code": true,
   
   "report_to": [],
-  "logging_dir": "./logs"
+  "logging_dir": "/project/fyp25_hc2/logs"
 }

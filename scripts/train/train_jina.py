@@ -83,12 +83,16 @@ def parse_args():
 
 def load_config(args) -> JinaTrainingConfig:
     """Load training configuration"""
-    # Load config from yaml
+    # Load config from yaml first
     config_path = os.path.join(project_root, 'config.yaml')
     if not os.path.exists(config_path):
         raise ValueError("config.yaml not found. Please copy config.yaml.example and modify it.")
     with open(config_path, 'r') as f:
         yaml_config = yaml.safe_load(f)
+
+    # Validate that model_path is set in yaml
+    if not yaml_config.get('model_path'):
+        raise ValueError("model_path not found in config.yaml. Please set your Jina model path.")
 
     if args.config_file and os.path.exists(args.config_file):
         with open(args.config_file, 'r') as f:
@@ -97,8 +101,8 @@ def load_config(args) -> JinaTrainingConfig:
     else:
         config = JinaTrainingConfig()
     
-    # Override with command line arguments
-    config.model_name_or_path = yaml_config.get('model_path', config.model_name_or_path)
+    # Override with yaml config and command line arguments
+    config.model_name_or_path = yaml_config['model_path']  # Always use yaml path
     config.output_dir = args.output_dir
     config.num_train_epochs = args.num_train_epochs
     config.per_device_train_batch_size = args.per_device_train_batch_size
@@ -113,6 +117,10 @@ def load_config(args) -> JinaTrainingConfig:
     config.bf16 = args.bf16
     config.fp16 = args.fp16
     config.resume_from_checkpoint = args.resume_from_checkpoint
+    
+    # Validate model path exists
+    if not os.path.exists(config.model_name_or_path):
+        raise ValueError(f"Model path not found: {config.model_name_or_path}. Please check your config.yaml.")
     
     return config
 
@@ -175,8 +183,21 @@ def main():
     logger.info(f"Batch size: {config.per_device_train_batch_size}")
     logger.info(f"Learning rate: {config.learning_rate}")
     
-    # Create output directory
+    # Create output directory and clean up old files
     os.makedirs(config.output_dir, exist_ok=True)
+    
+    # Clean up old training artifacts to save space
+    if os.path.exists(config.output_dir) and config.overwrite_output_dir:
+        logger.info(f"Cleaning up old files in {config.output_dir}...")
+        for item in os.listdir(config.output_dir):
+            item_path = os.path.join(config.output_dir, item)
+            if os.path.isdir(item_path) and item.startswith('checkpoint-'):
+                import shutil
+                shutil.rmtree(item_path)
+                logger.info(f"Removed old checkpoint: {item}")
+            elif item in ['optimizer.pt', 'scheduler.pt', 'trainer_state.json']:
+                os.remove(item_path)
+                logger.info(f"Removed old training file: {item}")
     
     # Check if data exists, create sample if not
     if not os.path.exists(args.train_data):
@@ -207,15 +228,23 @@ def main():
     logger.info("Loading model and processor...")
     
     try:
-        # Load Jina Embeddings V4 model from local path
+        # Load model
         logger.info(f"Loading Jina model from: {config.model_name_or_path}")
         model = JinaEmbeddingsV4Model.from_pretrained(
             config.model_name_or_path,
-            torch_dtype="auto",
+            torch_dtype=getattr(torch, config.torch_dtype) if config.torch_dtype != "auto" else "auto",
+            trust_remote_code=config.trust_remote_code,
+            cache_dir=config.cache_dir,
+        )
+        logger.info("Successfully loaded Jina Embeddings V4 model")
+        
+        # Load processor first
+        processor = JinaEmbeddingsV4Processor.from_pretrained(
+            config.model_name_or_path,
             trust_remote_code=config.trust_remote_code,
             local_files_only=True
         )
-        logger.info("Successfully loaded Jina Embeddings V4 model")
+        logger.info("Successfully loaded Jina processor")
         
         # Enable gradient checkpointing if configured
         if hasattr(config, 'gradient_checkpointing') and config.gradient_checkpointing:
@@ -266,14 +295,6 @@ def main():
             logger.error("No trainable parameters found! This will cause gradient errors.")
             raise ValueError("No trainable parameters found. Check LoRA configuration.")
         
-        # Load processor
-        processor = JinaEmbeddingsV4Processor.from_pretrained(
-            config.model_name_or_path,
-            trust_remote_code=config.trust_remote_code,
-            local_files_only=True
-        )
-        logger.info("Successfully loaded Jina processor")
-        
     except Exception as e:
         logger.error(f"Failed to load Jina model: {e}")
         raise e
@@ -298,7 +319,7 @@ def main():
         per_device_eval_batch_size=config.per_device_eval_batch_size,
         gradient_accumulation_steps=config.gradient_accumulation_steps,
         learning_rate=config.learning_rate,
-        max_steps=100,
+        # max_steps=100,  # Removed hardcoded limit
         weight_decay=config.weight_decay,
         adam_beta1=config.adam_beta1,
         adam_beta2=config.adam_beta2,
@@ -308,14 +329,13 @@ def main():
         warmup_ratio=config.warmup_ratio,
         warmup_steps=config.warmup_steps,
         logging_strategy=config.logging_strategy,
-        logging_steps=config.logging_steps,
+        logging_steps=1,  # Log every step for visibility
         eval_strategy=config.evaluation_strategy if eval_examples else "no",
         eval_steps=config.eval_steps,
-        save_strategy=config.save_strategy,
-
-        #下面两个先hardcode防止result太多超过内存限制
-        save_steps=10,
-        save_total_limit=1,
+        save_strategy="epoch",  # Only save at epoch end
+        save_steps=10,  # This will be ignored when save_strategy="epoch"
+        save_total_limit=1,  # Keep only the latest checkpoint
+        # save_only_model=True,  # Don't save optimizer/scheduler states
         dataloader_num_workers=config.dataloader_num_workers,
         dataloader_pin_memory=config.dataloader_pin_memory,
         dataloader_drop_last=getattr(config, 'dataloader_drop_last', True),
@@ -334,6 +354,15 @@ def main():
         ddp_find_unused_parameters=getattr(config, 'ddp_find_unused_parameters', False),
     )
     
+    logger.info(f"Training configuration:")
+    logger.info(f"  - Total epochs: {config.num_train_epochs}")
+    logger.info(f"  - Training examples: {len(train_examples)}")
+    logger.info(f"  - Batch size: {config.per_device_train_batch_size}")
+    logger.info(f"  - Gradient accumulation steps: {config.gradient_accumulation_steps}")
+    logger.info(f"  - Effective batch size: {config.per_device_train_batch_size * config.gradient_accumulation_steps}")
+    logger.info(f"  - Learning rate: {config.learning_rate}")
+    logger.info(f"  - Logging every: 1 step")
+    
     # Create trainer
     logger.info("Setting up trainer...")
     trainer = JinaEmbeddingTrainer(
@@ -347,11 +376,18 @@ def main():
     
     # Start training
     logger.info("Starting training...")
+    logger.info("You should see training progress below:")
     train_result = trainer.train(resume_from_checkpoint=config.resume_from_checkpoint)
     
     # Save model
     logger.info("Saving model...")
-    trainer.save_model()
+    if config.use_lora:
+        # For LoRA models, only save the adapter
+        trainer.model.save_pretrained(config.output_dir)
+        logger.info(f"LoRA adapter saved to {config.output_dir}")
+    else:
+        # For full fine-tuning, save the entire model
+        trainer.save_model()
     
     # Save training results
     with open(os.path.join(config.output_dir, "train_results.json"), "w") as f:
