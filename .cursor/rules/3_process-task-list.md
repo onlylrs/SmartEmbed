@@ -14,7 +14,7 @@ Guidelines for managing task lists in markdown files to track progress on comple
   2. If **all** subtasks underneath a parent task are now `[x]`, also mark the **parent task** as completed.
 - Stop after each sub-task and wait for the user's go-ahead.
 
-NOTE: One exception to "one-task-at-a-time" rule is if taksks are hard to isolate. Feel free to complete multiple connected sub-tasks at the same time if that's the case.
+NOTE: One exception to "one-task-at-a-time" rule is if tasks are hard to isolate. Feel free to complete multiple connected sub-tasks at the same time if that's the case.
 
 ## Task List Maintenance
 
