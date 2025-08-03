@@ -1,1 +1,6 @@
-model_path: "/path/to/your/jina-embedding-v4"  # Replace with your actual Jina model path
+# Jina Embeddings V4 Training Configuration
+# Copy this file to config.yaml and modify the paths according to your setup
+
+# Path to the Jina Embeddings V4 model directory
+# Replace with your actual model path
+model_path: "/path/to/your/jina-embedding-v4"  # e.g., /homes/username/Desktop/FYP/jina-embedding-v4
