@@ -1,7 +1,7 @@
 ---
 description: Create PRD (ML-Dev): A structured template and methodology for generating Product Requirements Documents to implement or debug training/evaluation/data-loading features so the pipeline matches our model intent.
 globs:
-  alwaysApply: false
+alwaysApply: false
 ---
 # Rule: Generating a Development PRD for Model Training & Evaluation (ML-Dev PRD)
 
