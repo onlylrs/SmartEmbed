@@ -10,10 +10,10 @@ export PYTHONUNBUFFERED=1
 export TRANSFORMERS_VERBOSITY=warning
 export DATASETS_VERBOSITY=warning
 
-# the following 2 lines are only for dealing with cuda out of mem issues - use GPU from 6
-# should be disabled when no one is using the GPU
-export CUDA_VISIBLE_DEVICES=6  # 使用空闲的GPU 6
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True  # 减少内存碎片
+# # the following 2 lines are only for dealing with cuda out of mem issues - use GPU from 6
+# # should be disabled when no one is using the GPU
+# export CUDA_VISIBLE_DEVICES=6  # 使用空闲的GPU 6
+# export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True  # 减少内存碎片
 
 echo "=== 开始训练 ==="
 echo "当前目录: $(pwd)"

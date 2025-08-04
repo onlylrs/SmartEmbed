@@ -94,9 +94,17 @@ class JinaEmbeddingTrainer(Trainer):
             elif key.startswith('positive_'):
                 positive_inputs[key.replace('positive_', '')] = value
         
+        # Extract task labels from batch data
+        if task_labels is not None and len(task_labels) > 0:
+            # Use the first task label in the batch (assuming all items in batch have same task)
+            current_task_label = task_labels[0] if isinstance(task_labels, (list, tuple)) else task_labels
+        else:
+            # Fallback to default task
+            current_task_label = "retrieval"
+        
         # Forward pass for queries
         query_outputs = model(
-            task_label="retrieval",  # Add required task_label parameter
+            task_label=current_task_label,
             **query_inputs
         )
         if isinstance(query_outputs, JinaEmbeddingsV4ModelOutput):
@@ -106,7 +114,7 @@ class JinaEmbeddingTrainer(Trainer):
             
         # Forward pass for positives
         positive_outputs = model(
-            task_label="retrieval",  # Add required task_label parameter
+            task_label=current_task_label,
             **positive_inputs
         )
         if isinstance(positive_outputs, JinaEmbeddingsV4ModelOutput):
@@ -266,7 +274,18 @@ class JinaEmbeddingTrainer(Trainer):
             else:
                 loss = None
                 with self.compute_loss_context_manager():
-                    outputs = model(**inputs)
+                    # Extract task_label from inputs for model forward pass
+                    task_labels = inputs.get("task_labels", None)
+                    if task_labels is not None and len(task_labels) > 0:
+                        current_task_label = task_labels[0] if isinstance(task_labels, (list, tuple)) else task_labels
+                    else:
+                        current_task_label = "retrieval"  # Default fallback
+                    
+                    # Remove task_labels from inputs and add task_label
+                    model_inputs = {k: v for k, v in inputs.items() if k != "task_labels"}
+                    model_inputs["task_label"] = current_task_label
+                    
+                    outputs = model(**model_inputs)
                 if isinstance(outputs, dict):
                     logits = tuple(v for k, v in outputs.items() if k not in ignore_keys)
                 else:
