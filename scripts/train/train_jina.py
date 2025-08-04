@@ -130,44 +130,6 @@ def load_config(args) -> JinaTrainingConfig:
     
     return config
 
-
-def create_sample_data(output_path: str):
-    """Create sample training data for testing"""
-    
-    sample_data = [
-        {
-            "query": "What is machine learning?",
-            "positive": "Machine learning is a subset of artificial intelligence that enables computers to learn and improve from experience without being explicitly programmed.",
-            "task": "retrieval"
-        },
-        {
-            "query": "How does deep learning work?",
-            "positive": "Deep learning uses neural networks with multiple layers to model and understand complex patterns in data.",
-            "task": "retrieval"
-        },
-        {
-            "query": "Python programming tutorial",
-            "positive": "def hello_world():\n    print('Hello, World!')\n\nhello_world()",
-            "task": "code"
-        },
-        {
-            "query": "What is natural language processing?",
-            "positive": "Natural language processing (NLP) is a branch of AI that helps computers understand, interpret and manipulate human language.",
-            "task": "text-matching"
-        },
-        {
-            "query": "Explain computer vision",
-            "positive": "Computer vision is a field of AI that trains computers to interpret and understand the visual world using digital images and videos.",
-            "task": "retrieval"
-        }
-    ]
-    
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(sample_data, f, indent=2, ensure_ascii=False)
-    
-    logger.info(f"Sample data created at {output_path}")
-
-
 def main():
     """Main training function"""
     
@@ -205,11 +167,6 @@ def main():
                 os.remove(item_path)
                 logger.info(f"Removed old training file: {item}")
     
-    # Check if data exists, create sample if not
-    if not os.path.exists(args.train_data):
-        logger.warning(f"Training data not found at {args.train_data}")
-        logger.info("Creating sample training data...")
-        create_sample_data(args.train_data)
     
     # Load training data
     logger.info("Loading training data...")
