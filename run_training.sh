@@ -27,12 +27,12 @@ python -u scripts/train/train_jina.py \
     --train_data data0/train.jsonl \
     --data_format jsonl \
     --config_file configs/jina_training_config.json \
-    --fp16 \
+    --bf16 \
     --num_train_epochs 1 \
     --per_device_train_batch_size 1 \
     --learning_rate 2e-5 \
     --max_seq_length 256 \
-    --output_dir /project/fyp25_hc2/results/jina_test_run \
+    --output_dir /project/fyp25_hc2/results/jina_test_run_fred \
     --use_lora \
     --lora_r 16 \
     --lora_alpha 16 2>&1 | tee training_output.log
