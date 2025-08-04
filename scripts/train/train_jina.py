@@ -247,11 +247,11 @@ def main():
         logger.info(f"Trainable parameters: {actual_trainable_params:,}")
         logger.info(f"Trainable percentage: {100 * actual_trainable_params / total_params:.2f}%")
         
-        # Print details of trainable parameters
-        logger.info("Trainable parameter breakdown:")
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                logger.info(f"  {name}: {param.numel():,} parameters")
+        # Print details of trainable parameters - DISABLED to reduce log verbosity
+        # logger.info("Trainable parameter breakdown:")
+        # for name, param in model.named_parameters():
+        #     if param.requires_grad:
+        #         logger.info(f"  {name}: {param.numel():,} parameters")
         
         # Verify that we have trainable parameters
         if actual_trainable_params == 0:
