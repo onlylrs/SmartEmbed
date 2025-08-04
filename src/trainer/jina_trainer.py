@@ -366,11 +366,11 @@ def setup_model_for_training(
         total_params = sum(p.numel() for p in model.parameters())
         logger.info(f"Trainable parameters: {trainable_params:,} / {total_params:,} ({100 * trainable_params / total_params:.2f}%)")
         
-        # Log which parameters are trainable
-        logger.info("Trainable parameters:")
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                logger.info(f"  {name}: {param.shape}")
+        # # Log which parameters are trainable
+        # logger.info("Trainable parameters:")
+        # for name, param in model.named_parameters():
+        #     if param.requires_grad:
+        #         logger.info(f"  {name}: {param.shape}")
     
     return model
 

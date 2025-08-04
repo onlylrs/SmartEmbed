@@ -7,8 +7,8 @@ cd "$SCRIPT_DIR"
 
 # 设置环境变量以确保输出显示
 export PYTHONUNBUFFERED=1
-export TRANSFORMERS_VERBOSITY=info
-export DATASETS_VERBOSITY=info
+export TRANSFORMERS_VERBOSITY=warning
+export DATASETS_VERBOSITY=warning
 
 echo "=== 开始训练 ==="
 echo "当前目录: $(pwd)"

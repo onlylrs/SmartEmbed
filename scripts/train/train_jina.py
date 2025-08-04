@@ -40,6 +40,12 @@ logging.basicConfig(
     datefmt="%m/%d/%Y %H:%M:%S",
     level=logging.INFO,
 )
+
+# Reduce transformers logging verbosity
+logging.getLogger("transformers").setLevel(logging.WARNING)
+logging.getLogger("transformers.modeling_utils").setLevel(logging.WARNING)
+logging.getLogger("transformers.configuration_utils").setLevel(logging.WARNING)
+logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
