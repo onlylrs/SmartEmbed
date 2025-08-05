@@ -209,10 +209,11 @@ def main():
         )
         logger.info("Successfully loaded Jina processor")
         
-        # Enable gradient checkpointing if configured
-        if hasattr(config, 'gradient_checkpointing') and config.gradient_checkpointing:
-            model.gradient_checkpointing_enable()
-            logger.info("Gradient checkpointing enabled")
+        # Disable gradient checkpointing for now to avoid conflicts with PEFT
+        # if hasattr(config, 'gradient_checkpointing') and config.gradient_checkpointing:
+        #     model.gradient_checkpointing_enable()
+        #     logger.info("Gradient checkpointing enabled")
+        logger.info("Gradient checkpointing disabled to avoid PEFT conflicts")
         
         # Set model to use less memory
         if torch.cuda.is_available():
@@ -313,7 +314,7 @@ def main():
         logging_dir=config.logging_dir,
         resume_from_checkpoint=config.resume_from_checkpoint,
         ignore_data_skip=config.ignore_data_skip,
-        gradient_checkpointing=getattr(config, 'gradient_checkpointing', True),
+        gradient_checkpointing=False,  # Disabled to avoid PEFT conflicts
         ddp_find_unused_parameters=getattr(config, 'ddp_find_unused_parameters', False),
     )
     

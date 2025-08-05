@@ -215,8 +215,24 @@ class JinaEmbeddingTrainer(Trainer):
                     else:
                         current_task_label = "retrieval"  # Default fallback
                     
-                    # Remove task_labels from inputs and add task_label
-                    model_inputs = {k: v for k, v in inputs.items() if k != "task_labels"}
+                    # Process inputs similar to compute_loss
+                    model_inputs = {}
+                    
+                    # Check if we have query/positive prefixed inputs (training format)
+                    has_query_inputs = any(k.startswith('query_') for k in inputs.keys())
+                    
+                    if has_query_inputs:
+                        # Extract query inputs for evaluation (use query as the main input)
+                        for key, value in inputs.items():
+                            if key.startswith('query_'):
+                                model_inputs[key.replace('query_', '')] = value
+                            elif not key.startswith('positive_') and key != "task_labels":
+                                model_inputs[key] = value
+                    else:
+                        # Standard inputs without prefixes
+                        model_inputs = {k: v for k, v in inputs.items() if k != "task_labels"}
+                    
+                    # Add task_label
                     model_inputs["task_label"] = current_task_label
                     
                     outputs = model(**model_inputs)
@@ -287,24 +303,35 @@ def setup_model_for_training(
     )
     
     if training_config.use_lora:
-        # Configure LoRA with corrected target modules
-        lora_config = LoraConfig(
-            task_type=TaskType.FEATURE_EXTRACTION,
-            r=training_config.lora_r,
-            lora_alpha=training_config.lora_alpha,
-            lora_dropout=training_config.lora_dropout,
-            target_modules=[
-                # Core Qwen attention and MLP layers
-                "q_proj", "k_proj", "v_proj", "o_proj",  # attention
-                "gate_proj", "up_proj", "down_proj",     # MLP
-                # Jina-specific projection layers
-                "multi_vector_projector",
-            ],
-            bias=training_config.lora_bias,
-        )
-        
-        # Apply LoRA to model
-        model = get_peft_model(model, lora_config)
+        # Check if model is already a PEFT model (from pretrained Jina model)
+        if hasattr(model, 'peft_config'):
+            logger.info("Model is already a PEFT model, skipping LoRA configuration")
+            # Force enable training mode to override inference_mode=True from pretrained config
+            model.train()
+            # Enable gradients for all PEFT parameters
+            for name, param in model.named_parameters():
+                if 'lora_' in name or 'adapters' in name:
+                    param.requires_grad = True
+        else:
+            # Configure LoRA with corrected target modules
+            lora_config = LoraConfig(
+                task_type=TaskType.FEATURE_EXTRACTION,
+                r=training_config.lora_r,
+                lora_alpha=training_config.lora_alpha,
+                lora_dropout=training_config.lora_dropout,
+                target_modules=[
+                    # Core Qwen attention and MLP layers
+                    "q_proj", "k_proj", "v_proj", "o_proj",  # attention
+                    "gate_proj", "up_proj", "down_proj",     # MLP
+                    # Jina-specific projection layers
+                    "multi_vector_projector",
+                ],
+                bias=training_config.lora_bias,
+                inference_mode=False,  # Explicitly set to False for training
+            )
+            
+            # Apply LoRA to model
+            model = get_peft_model(model, lora_config)
         
         # Ensure projection layers are trainable even if not in LoRA targets
         for name, param in model.named_parameters():
