@@ -27,7 +27,7 @@ Thumbs.db
 /data/raw/*
 /data/processed/*
 !data/examples/
-*.jsonl
+!data/examples/*.jsonl
 *.csv
 *.json
 images/
