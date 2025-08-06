@@ -1,11 +1,4 @@
-//   base model 要求的数据格式如下所示，现在的test版本省去了img相关的部分，但是实际数据应该加上
-//   "query": "用户查询文本",
-//   "positive": "相关的正样本文本", 
-//   "negative": "不相关的负样本文本 (可选)",
-//   "task": "retrieval",
-//   "query_image": "查询图片路径 (可选)",
-//   "positive_image": "正样本图片路径 (可选)", 
-//   "negative_image": "负样本图片路径 (可选)"
-
 {"query": "What is AI?", "positive": "Artificial Intelligence (AI) is the simulation of human intelligence in machines that are programmed to think and learn.", "negative": "Pizza is a popular Italian dish made with dough, tomato sauce, and cheese.", "task": "retrieval"}
 {"query": "How does backpropagation work?", "positive": "Backpropagation is an algorithm used to train neural networks by calculating gradients and updating weights to minimize loss.", "negative": "Swimming is a great form of exercise that works multiple muscle groups and improves cardiovascular health.", "task": "retrieval"}
+{"query": "What is machine learning?", "positive": "Machine learning is a subset of AI that focuses on creating systems that can learn and improve from experience without being explicitly programmed.", "negative": "Cooking involves preparing food by combining ingredients and applying heat through various methods.", "task": "retrieval"}
+{"query": "Explain deep learning", "positive": "Deep learning is a machine learning technique based on artificial neural networks with multiple layers that can learn complex patterns from data.", "negative": "Gardening is the practice of growing and cultivating plants as part of horticulture.", "task": "retrieval"}

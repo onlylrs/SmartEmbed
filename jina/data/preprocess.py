@@ -1,7 +1,7 @@
 import json
 import os
 from tqdm import tqdm
-from src.datasets.qwen_utils.data_utils import load_image
+from jina.utils.qwen_utils.data_utils import load_image
 
 def convert_to_contrastive_format(
     input_path: str,

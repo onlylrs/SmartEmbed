@@ -4,15 +4,21 @@ Inference script for Jina Embeddings V4 model
 """
 
 import os
+import sys
 import json
 import argparse
 from typing import List, Union, Optional
+from pathlib import Path
 import torch
 import numpy as np
 from PIL import Image
 
-from src.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
-from src.models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
+# Add project root to Python path
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+
+from jina.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
+from jina.models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
 
 
 def parse_args():

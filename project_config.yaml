@@ -6,7 +6,7 @@ base_model_path: "/csproject/fyp25_hc2/jina-embeddings-v4"
 # 数据配置
 data:
   raw_dir: "data/raw"
-  processed_dir: "data/processed" 
+  processed_dir: "data/processed"  # 定义 train.py 时需要的数据
   examples_dir: "data/examples"
 
 # 训练配置

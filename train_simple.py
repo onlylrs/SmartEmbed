@@ -2,11 +2,6 @@
 """
 Main training script for Jina Embeddings V4 fine-tuning
 
-简化说明：
-1. 直接从项目中导入Jina模型（已复制到src/models/）
-2. 不需要复杂的动态导入
-3. 模型路径直接指向base预训练权重目录
-4. 简单直接，易于理解和维护
 """
 
 import os
@@ -41,10 +36,10 @@ def main():
     # Test imports
     try:
         print("\n� Testing imports...")
-        from src.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor, JinaEmbeddingsV4Config
+        from jina.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor, JinaEmbeddingsV4Config
         print("✅ Successfully imported Jina model classes")
         
-        from src.datasets.jina_dataset import JinaEmbeddingDataset, JinaTrainingExample, load_training_data
+        from jina.data.jina_dataset import JinaEmbeddingDataset, JinaTrainingExample, load_training_data
         print("✅ Successfully imported dataset classes")
         
     except ImportError as e:

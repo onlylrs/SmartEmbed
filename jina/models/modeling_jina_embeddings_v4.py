@@ -21,9 +21,9 @@ from transformers import BatchFeature
 from transformers.utils import is_flash_attn_2_available
 
 # 修改为绝对导入，避免相对导入问题
-from src.models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
-from src.models.custom_lora_module import MultiAdapterLinear
-from src.models.qwen2_5_vl import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
+from jina.models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
+from jina.models.custom_lora_module import MultiAdapterLinear
+from jina.models.qwen2_5_vl import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
 
 
 class PromptType(str, Enum):

@@ -4,16 +4,22 @@ Evaluation script for Jina Embeddings V4 model
 """
 
 import os
+import sys
 import json
 import argparse
 import numpy as np
 from typing import List, Dict, Tuple
+from pathlib import Path
 import torch
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
-from src.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model
-from scripts.inference.infer_jina import load_model, encode_texts, encode_images
+# Add project root to Python path
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
+
+from jina.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model
+from inference import load_model, encode_texts, encode_images
 
 
 def parse_args():
