@@ -1,0 +1,31 @@
+# Jina Embeddings V4 Research Project Configuration
+
+# 基础模型路径（包含预训练的Jina模型）
+base_model_path: "/homes/rgongac/Desktop/FYP/jina-embeddings-v4-base"
+
+# 数据配置
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed" 
+  examples_dir: "data/examples"
+
+# 训练配置
+training:
+  output_dir: "outputs/models"
+  log_dir: "outputs/logs"
+  batch_size: 2
+  learning_rate: 1e-4
+  epochs: 3
+  use_lora: true
+
+# LoRA配置
+lora:
+  r: 16
+  alpha: 16
+  dropout: 0.1
+
+# 系统配置
+system:
+  cuda_visible_devices: 0
+  bf16: true
+  max_seq_length: 256

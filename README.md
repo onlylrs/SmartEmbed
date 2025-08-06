@@ -1,53 +1,56 @@
-# Baseline Model - Jina Embeddings V4
+# Jina Embeddings V4 Research Project
 
-A reproduction and training framework for Jina Embeddings V4 model, supporting LoRA fine-tuning with optimized storage management.
+这个项目用于研究和微调 Jina Embeddings V4 模型。
 
-## Features
-
-- 🚀 **Based on Qwen2.5-VL-3B-Instruct** architecture
-- 🎯 **LoRA Fine-tuning** with configurable parameters (reduces model size from 686MB to ~388MB)
-- 📊 **Multiple Task Support** for retrieval, text-matching, and code tasks
-- 💾 **Smart Storage Management** with automatic cleanup and space optimization
-- 📝 **Comprehensive Logging** with detailed training output and progress tracking
-- 🔧 **Flexible Configuration** via YAML and JSON config files
-
-## Project Structure
+## 项目结构
 
 ```
-SmartEmbed/
-├── configs/                    # Training configuration files
-│   ├── jina_training_config.json  # Main training parameters
-│   └── ...                     # Other model configs
-├── src/                        # Source code
-│   ├── models/                 # Model implementations
-│   ├── trainer/                # Training logic
-│   ├── datasets/               # Data loading utilities
-│   └── ...
-├── scripts/                    # Training and evaluation scripts
-│   ├── train/                  # Training scripts
-│   │   └── train_jina.py       # Main training script
-│   └── ...
-├── data0/                      # Training data
-│   ├── train.jsonl             # Training examples
-│   └── eval.jsonl              # Evaluation examples
-├── config.yaml                 # User-specific configuration (model paths)
-├── run_training.sh             # Main training script with detailed output
-└── requirements.txt            # Python dependencies
+jina-research-project/
+├── config.yaml                 # 基础配置（模型路径）
+├── project_config.yaml         # 详细项目配置
+├── train.py                    # 主训练入口
+├── run.sh                      # 快速运行脚本
+├── data/                       # 数据目录
+├── outputs/                    # 输出目录  
+├── scripts/                    # 专门的脚本
+│   ├── train/train_jina.py     # Jina训练脚本
+│   ├── inference/infer_jina.py # Jina推理脚本
+│   ├── evaluation/evaluate_jina.py # Jina评估脚本
+│   └── data/                   # 数据处理脚本
+├── src/                        # 源代码
+├── docs/                       # 文档
+├── notebooks/                  # Jupyter notebooks
+└── tests/                      # 测试
 ```
 
-## Quick Start
+## 快速开始
 
-### 1. Environment Setup
+1. 确保基础模型存在: `../jina-embeddings-v4-base/`
+2. 准备训练数据到 `data/processed/train.jsonl`
+3. 运行训练: `./run.sh`
+4. 查看结果: `outputs/models/finetuned/`
 
-Install dependencies:
+## 配置说明
+
+- `config.yaml` - 基础配置，主要是模型路径
+- `project_config.yaml` - 详细的项目配置，包括训练参数
+
+## 使用方法
+
+### 方法1: 使用 run.sh (推荐)
 ```bash
-pip install -r requirements.txt
+./run.sh
 ```
 
-### 2. Configuration
+### 方法2: 直接使用主训练脚本
+```bash
+python train.py
+```
 
-1. **Copy configuration template:**
-   ```bash
+### 方法3: 使用原始训练脚本
+```bash
+python scripts/train/train_jina.py --train_data data/processed/train.jsonl [其他参数]
+```
    cp config.yaml.example config.yaml
    ```
 
