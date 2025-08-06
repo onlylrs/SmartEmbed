@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
 """
-Main training script for Jina Embeddings V4 fine-tuning
+该文件功能范围说明：
+✅ 验证基础模型路径存在
+✅ 测试模块导入 (jina.models, jina.data)
+✅ 测试数据加载 (4个测试样本)
+✅ 测试处理器初始化
+✅ 测试文本处理功能
+❌ 不进行任何训练
+❌ 不保存模型
+❌ 不使用LoRA
+
+仅能保证：
+✅ 导入路径正确
+✅ 基础模型路径有效
+✅ 数据格式兼容
+✅ 处理器能正常工作
+✅ 基本的文本处理功能正常
 
 """
 
