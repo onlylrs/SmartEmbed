@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Main training script for Jina Embeddings V4 fine-tuning
-Simplified unified training script
+
 """
 
 import sys

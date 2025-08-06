@@ -24,7 +24,7 @@ from ..models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbe
 from ..models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
 from ..models.losses import JinaContrastiveLoss, JinaMultiTaskLoss, JinaMatryoshkaLoss
 from ..training.training_config import JinaTrainingConfig
-from ..datasets.data_collator import JinaContrastiveDataCollator
+from ..data.data_collator import JinaContrastiveDataCollator
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +69,11 @@ class JinaEmbeddingTrainer(Trainer):
                 return_tensors="pt"
             )
         
+        # Fix for newer transformers versions
         super().__init__(
             model=model,
             args=training_args,
-            tokenizer=tokenizer,
+            processing_class=tokenizer,  # Use processing_class instead of tokenizer
             **kwargs
         )
     
@@ -287,6 +288,56 @@ class JinaEmbeddingTrainer(Trainer):
 
 
 def setup_model_for_training(
+    model_or_path,
+    use_lora: bool = True,
+    lora_r: int = 16,
+    lora_alpha: int = 16,
+    lora_dropout: float = 0.1,
+    task_names: List[str] = None,
+) -> JinaEmbeddingsV4Model:
+    """
+    Simplified setup function for model training with LoRA adapters
+    Compatible with train.py calling convention
+    """
+    
+    # If a model is passed, use it; otherwise load from path
+    if isinstance(model_or_path, str):
+        model = JinaEmbeddingsV4Model.from_pretrained(
+            model_or_path,
+            torch_dtype="auto",
+            trust_remote_code=True,
+        )
+    else:
+        model = model_or_path
+    
+    if use_lora:
+        # Check if model is already a PEFT model
+        if hasattr(model, 'peft_config'):
+            logger.info("Model is already a PEFT model, skipping LoRA configuration")
+            model.train()
+            return model
+        
+        # Add LoRA adapters
+        if task_names is None:
+            task_names = ["retrieval", "text-matching", "code"]
+        
+        lora_config = LoraConfig(
+            task_type=TaskType.FEATURE_EXTRACTION,
+            r=lora_r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj", 
+                          "gate_proj", "up_proj", "down_proj"],
+            modules_to_save=["multi_vector_projector"],
+        )
+        
+        model = get_peft_model(model, lora_config)
+        logger.info("LoRA adapters added to model")
+    
+    return model
+
+
+def setup_model_for_training_legacy(
     training_config: JinaTrainingConfig,
     tokenizer: Optional[PreTrainedTokenizer] = None,
 ) -> JinaEmbeddingsV4Model:
