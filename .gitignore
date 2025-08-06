@@ -3,26 +3,35 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.pyc
 
 # Virtual environments
 .env
 .venv
 env/
 venv/
+conda-meta/
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
 
 # Data files (don't commit large datasets)
-/data0
+/data/raw/*
+/data/processed/*
+!data/examples/
 *.jsonl
 *.csv
+*.json
 images/
+videos/
 
 # Model files (don't commit large trained models)
 *.bin
@@ -32,22 +41,46 @@ images/
 *.h5
 *.pkl
 *.pickle
+*.safetensors
+
+# Training outputs (our new structure)
+/outputs/models/*
+/outputs/logs/*
+/outputs/results/*
+!outputs/models/.gitkeep
+!outputs/logs/.gitkeep
+!outputs/results/.gitkeep
 
 # Training artifacts
 checkpoints/
-outputs/
-results/
 runs/
-logs/
 wandb/
+tensorboard/
 
 # Cache
 .cache/
 huggingface/
+transformers_cache/
 
 # Temporary files
 tmp/
 temp/
+.tmp/
+
+# Configuration files with sensitive info
+config_local.yaml
+.env.local
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Test coverage
+.coverage
+htmlcov/
+
+# Documentation builds
+docs/_build/
 *.log
 *.out
 *.err
