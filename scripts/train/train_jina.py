@@ -24,7 +24,7 @@ from transformers import (
 )
 
 # Import our modules
-from src.models.modeling_qwen2_5_vl import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
+from src.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
 from src.models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
 from src.training.training_config import JinaTrainingConfig
 from src.trainer.jina_trainer import JinaEmbeddingTrainer, setup_model_for_training

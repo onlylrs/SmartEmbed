@@ -12,7 +12,7 @@ import torch
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
-from src.models.modeling_qwen2_5_vl import JinaEmbeddingsV4Model
+from src.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model
 from scripts.inference.infer_jina import load_model, encode_texts, encode_images
 
 

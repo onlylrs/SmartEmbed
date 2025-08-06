@@ -20,7 +20,7 @@ from transformers import (
 from transformers.trainer_utils import PredictionOutput
 from peft import LoraConfig, get_peft_model, TaskType
 
-from ..models.modeling_qwen2_5_vl import JinaEmbeddingsV4Model, JinaEmbeddingsV4ModelOutput
+from ..models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4ModelOutput
 from ..models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
 from ..models.losses import JinaContrastiveLoss, JinaMultiTaskLoss, JinaMatryoshkaLoss
 from ..training.training_config import JinaTrainingConfig

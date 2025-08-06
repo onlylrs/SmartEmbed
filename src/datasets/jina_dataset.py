@@ -12,7 +12,7 @@ from PIL import Image
 import random
 
 from transformers import PreTrainedTokenizer
-from ..models.modeling_qwen2_5_vl import JinaEmbeddingsV4Processor
+from ..models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Processor
 
 
 @dataclass

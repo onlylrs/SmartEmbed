@@ -11,7 +11,7 @@ import torch
 import numpy as np
 from PIL import Image
 
-from src.models.modeling_qwen2_5_vl import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
+from src.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
 from src.models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
 
 
