@@ -26,7 +26,7 @@ from jina.training.jina_trainer import JinaEmbeddingTrainer, setup_model_for_tra
 from jina.training.training_config import JinaTrainingConfig
 
 # Import Liam's data loading solution
-from src.datasets.multimodal_dataset import get_training_dataloader
+from jina.data.multimodal_dataset import get_training_dataloader
 
 # Setup logging
 logging.basicConfig(
@@ -159,20 +159,32 @@ def main():
         sys.exit(1)
     
     # Set up training parameters from unified config
-    train_data_path = args.train_data or str(project_root / config['data']['processed_dir'] / 'train.jsonl')
+    # Default to data/train.jsonl when --train_data not provided
+    train_data_path = args.train_data or str(project_root / 'data' / 'train.jsonl')
     eval_data_path = args.eval_data if args.eval_data else None
-    
+
     output_dir = Path(training_config.output_dir)
-    
+
     print(f"📊 Training data: {train_data_path}")
     print(f"📈 Training config: {training_config.num_train_epochs} epochs, batch_size={training_config.per_device_train_batch_size}, lr={training_config.learning_rate}")
     print(f"💾 Output directory: {output_dir}")
-    
+
     # Check training data exists
     if not Path(train_data_path).exists():
         print(f"❌ Training data not found: {train_data_path}")
         print("💡 Please create training data in the specified path")
         sys.exit(1)
+
+    # Build data_config for loader
+    data_config = {
+        "jsonl_path": train_data_path,
+        "batch_size": training_config.per_device_train_batch_size,
+        "text_max_length": training_config.max_seq_length,
+        "image_max_patches": 256,
+        "task_name": "retrieval",
+        "shuffle": True,
+        "num_workers": 0,
+    }
     
     # Set random seed
     set_seed(42)
@@ -180,14 +192,11 @@ def main():
     try:
         # Load data using Liam's solution
         # ---- NEW: build real dataloader via src.datasets.multimodal_dataset ---- #
-        from src.datasets.multimodal_dataset import get_training_dataloader
-
-        train_dataloader = get_training_dataloader(data_config)
+        train_dataloader = get_training_dataloader(data_config, model_path=str(base_model_path))
         train_dataset = train_dataloader.dataset
         
-        # Load model and processor
-        logger.info("Loading model and processor...")
-        processor = JinaEmbeddingsV4Processor.from_pretrained(str(base_model_path))
+        # Load model (processor is already inside Dataset)
+        logger.info("Loading model...")
         model = JinaEmbeddingsV4Model.from_pretrained(str(base_model_path))
         
         # Setup model for training
@@ -240,9 +249,10 @@ def main():
         # Initialize trainer with both TrainingArguments and JinaTrainingConfig
         trainer = JinaEmbeddingTrainer(
             model=model,
-            training_config=training_config,  # 🔥 This was missing!
+            training_config=training_config,
             training_args=training_args,
-            tokenizer=processor,
+            tokenizer=train_dataloader.dataset.processor,
+            data_collator=train_dataloader.collate_fn,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
         )
@@ -254,7 +264,7 @@ def main():
         # Save final model
         logger.info(f"Saving final model to {output_dir}")
         trainer.save_model()
-        processor.save_pretrained(str(output_dir))
+        train_dataloader.dataset.processor.save_pretrained(str(output_dir))
         
         print("🎉 Training completed successfully!")
         print(f"📁 Model saved to: {output_dir}")

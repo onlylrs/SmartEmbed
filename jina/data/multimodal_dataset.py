@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Union, Any
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
+from .data_collator import JinaContrastiveDataCollator
 import numpy as np
 
 # Import Jina components
@@ -139,8 +140,12 @@ class MultimodalDataset(Dataset):
             
             # Combine results
             result = {
-                'input_ids': text_encoded['input_ids'].squeeze(0),
-                'attention_mask': text_encoded['attention_mask'].squeeze(0),
+                # Text (positive branch)
+                'text_input_ids': text_encoded['input_ids'].squeeze(0),
+                'text_attention_mask': text_encoded['attention_mask'].squeeze(0),
+                # Image (query branch)
+                'image_input_ids': image_encoded['input_ids'].squeeze(0),
+                'image_attention_mask': image_encoded['attention_mask'].squeeze(0),
                 'pixel_values': image_encoded['pixel_values'].squeeze(0),
                 'task_label': item['task']
             }
@@ -201,8 +206,12 @@ class MultimodalDataset(Dataset):
         dummy_image = self._process_image("")  # Will create black image
         
         return {
-            'input_ids': dummy_text['input_ids'].squeeze(0),
-            'attention_mask': dummy_text['attention_mask'].squeeze(0),
+            # Text branch dummy
+            'text_input_ids': dummy_text['input_ids'].squeeze(0),
+            'text_attention_mask': dummy_text['attention_mask'].squeeze(0),
+            # Image branch dummy (no real tokens, but keep shape)
+            'image_input_ids': dummy_text['input_ids'].squeeze(0),  # reuse text tokens as placeholder
+            'image_attention_mask': dummy_text['attention_mask'].squeeze(0),
             'pixel_values': dummy_image['pixel_values'].squeeze(0),
             'task_label': self.task_name
         }
@@ -304,8 +313,11 @@ def create_multimodal_dataloader(
         image_base_dir=image_base_dir
     )
     
-    # Create collator
-    collator = MultimodalCollator(pad_token_id=processor.tokenizer.pad_token_id)
+    # Create collator (prefixed keys for Trainer)
+    collator = JinaContrastiveDataCollator(
+        tokenizer=processor.tokenizer,
+        max_length=text_max_length,
+    )
     
     # Create dataloader
     dataloader = DataLoader(

@@ -48,10 +48,17 @@ class JinaContrastiveDataCollator:
     def __call__(self, batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         # Split into separate modality lists
         pixel_values = [item["pixel_values"] for item in batch]
-        image_grid_thw = [item.get("image_grid_thw") for item in batch if "image_grid_thw" in item]
+        image_grid_thw = [
+            item.get("image_grid_thw") for item in batch if "image_grid_thw" in item
+        ]
 
-        input_ids = [item["input_ids"] for item in batch]
-        attention_masks = [item["attention_mask"] for item in batch]
+        # Text branch tensors
+        text_input_ids = [item["text_input_ids"] for item in batch]
+        text_attention_masks = [item["text_attention_mask"] for item in batch]
+
+        # Image branch token tensors (needed by model)
+        image_input_ids = [item["image_input_ids"] for item in batch]
+        image_attention_masks = [item["image_attention_mask"] for item in batch]
 
         task_labels = [item.get("task_label", "retrieval") for item in batch]
 
@@ -60,12 +67,14 @@ class JinaContrastiveDataCollator:
 
         # Query branch (image)
         collated["query_pixel_values"] = torch.stack(pixel_values)
+        collated["query_input_ids"] = torch.stack(image_input_ids)
+        collated["query_attention_mask"] = torch.stack(image_attention_masks)
         if image_grid_thw:
             collated["query_image_grid_thw"] = torch.stack(image_grid_thw)
 
         # Positive branch (text)
-        collated["positive_input_ids"] = self._pad_text_batch(input_ids)
-        collated["positive_attention_mask"] = self._pad_text_batch(attention_masks)
+        collated["positive_input_ids"] = self._pad_text_batch(text_input_ids)
+        collated["positive_attention_mask"] = self._pad_text_batch(text_attention_masks)
 
         # Meta
         collated["task_labels"] = task_labels
