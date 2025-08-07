@@ -25,8 +25,8 @@ from jina.models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
 from jina.training.jina_trainer import JinaEmbeddingTrainer, setup_model_for_training
 from jina.training.training_config import JinaTrainingConfig
 
-# Import Liam's data loading solution (when merged)
-# from src.datasets.multimodal_dataset import get_training_dataloader
+# Import Liam's data loading solution
+from src.datasets.multimodal_dataset import get_training_dataloader
 
 # Setup logging
 logging.basicConfig(
