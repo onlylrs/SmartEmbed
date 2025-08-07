@@ -178,25 +178,35 @@ class MultimodalDataset(Dataset):
         return encoded
     
     def _process_image(self, image_path: str) -> Dict[str, torch.Tensor]:
-        """Process image using Jina processor."""
+        """Process image using Jina processor with size normalization."""
         try:
             # Load image
             image = Image.open(image_path).convert('RGB')
             
+            # CRITICAL: Resize all images to a consistent size
+            # This ensures consistent token counts and eliminates position encoding issues
+            target_size = (448, 448)  # Square aspect ratio, reasonable resolution
+            
+            # Resize image while maintaining quality
+            original_size = image.size
+            resized_image = image.resize(target_size, Image.Resampling.LANCZOS)
+            
+            # Log the resize operation (optional, can be removed for performance)
+            logger.debug(f"Resized image {image_path}: {original_size} → {target_size}")
+            
             with torch.no_grad():
-                # Process image
-                image_inputs = self.processor.process_images([image])
+                # Process the resized image
+                image_inputs = self.processor.process_images([resized_image])
                 
-                # Limit patches if needed
-                if image_inputs['pixel_values'].shape[1] > self.image_max_patches:
-                    image_inputs['pixel_values'] = image_inputs['pixel_values'][:, :self.image_max_patches, :]
-                
+                # Now all images should produce consistent token counts!
+                # No need for manual padding/truncation
+            
             return image_inputs
             
         except Exception as e:
             logger.warning(f"Failed to load image {image_path}: {e}")
-            # Create dummy image
-            dummy_image = Image.new('RGB', (224, 224), color='black')
+            # Create dummy image with same target size
+            dummy_image = Image.new('RGB', (448, 448), color='black')
             with torch.no_grad():
                 return self.processor.process_images([dummy_image])
     

@@ -244,6 +244,7 @@ def main():
             report_to="none",
             bf16=bool(config['system']['bf16']),  # Ensure boolean type
             dataloader_pin_memory=False,
+            remove_unused_columns=False,  # Critical: Don't remove our columns!
         )
         
         # Initialize trainer with both TrainingArguments and JinaTrainingConfig

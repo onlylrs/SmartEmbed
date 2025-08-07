@@ -32,16 +32,61 @@ class JinaContrastiveDataCollator:
         self.padding = padding
         self.max_length = max_length
         self.return_tensors = return_tensors
+        # Get the correct padding token ID from tokenizer
+        self.pad_token_id = getattr(tokenizer, 'pad_token_id', 0) if tokenizer else 0
 
     # ---------------------------------------------------------------------
     # Helper functions
     # ---------------------------------------------------------------------
     def _pad_text_batch(self, sequences: List[torch.Tensor]) -> torch.Tensor:
-        """Pad a list of 1-D or 2-D tensors (token ids / masks)."""
+        """Pad a list of 1-D or 2-D tensors (token ids / masks) using proper padding."""
         if not sequences:
             return None
-        # All sequences already right-padded in MultimodalDataset, stack directly
-        return torch.stack(sequences)
+        
+        # With uniform image sizes, most sequences should be the same length
+        # But we still use padding for safety
+        if sequences[0].dtype == torch.long:
+            padding_value = self.pad_token_id
+        else:
+            padding_value = 0
+        
+        return pad_sequence(sequences, batch_first=True, padding_value=padding_value)
+    
+    def _stack_or_pad_tensors(self, tensors: List[torch.Tensor]) -> torch.Tensor:
+        """Stack tensors if same size, otherwise pad them."""
+        if not tensors:
+            return None
+            
+        # Check if all tensors have the same shape
+        shapes = [t.shape for t in tensors]
+        if len(set(shapes)) == 1:
+            # All same shape, can stack directly (this should be the common case now)
+            return torch.stack(tensors)
+        else:
+            # Fall back to padding (shouldn't happen often with uniform images)
+            logger.debug(f"Tensor shapes vary: {shapes[:3]}... - using padding")
+            return self._pad_pixel_values(tensors)
+    
+    def _pad_pixel_values(self, pixel_values_list: List[torch.Tensor]) -> torch.Tensor:
+        """Pad pixel values to same number of patches."""
+        if not pixel_values_list:
+            return None
+        
+        # Find max number of patches
+        max_patches = max(pv.shape[0] for pv in pixel_values_list)
+        
+        padded_list = []
+        for pv in pixel_values_list:
+            if pv.shape[0] < max_patches:
+                # Pad with zeros
+                pad_size = max_patches - pv.shape[0]
+                padding = torch.zeros(pad_size, pv.shape[1], dtype=pv.dtype, device=pv.device)
+                padded_pv = torch.cat([pv, padding], dim=0)
+                padded_list.append(padded_pv)
+            else:
+                padded_list.append(pv)
+        
+        return torch.stack(padded_list)
 
     # ------------------------------------------------------------------
 
@@ -66,9 +111,9 @@ class JinaContrastiveDataCollator:
         collated: Dict[str, Any] = {}
 
         # Query branch (image)
-        collated["query_pixel_values"] = torch.stack(pixel_values)
-        collated["query_input_ids"] = torch.stack(image_input_ids)
-        collated["query_attention_mask"] = torch.stack(image_attention_masks)
+        collated["query_pixel_values"] = self._stack_or_pad_tensors(pixel_values)
+        collated["query_input_ids"] = self._pad_text_batch(image_input_ids)
+        collated["query_attention_mask"] = self._pad_text_batch(image_attention_masks)
         if image_grid_thw:
             collated["query_image_grid_thw"] = torch.stack(image_grid_thw)
 
