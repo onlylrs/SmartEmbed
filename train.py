@@ -270,8 +270,13 @@ def main():
         print(f"📁 Model saved to: {output_dir}")
         
     except Exception as e:
+        import traceback
+        full_traceback = traceback.format_exc()
         logger.error(f"Training failed: {e}")
+        logger.error(f"Full traceback:\n{full_traceback}")
         print(f"❌ Training failed: {e}")
+        print(f"🔍 Full error traceback:")
+        print(full_traceback)
         sys.exit(1)
 
 
