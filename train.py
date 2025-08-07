@@ -179,32 +179,11 @@ def main():
     
     try:
         # Load data using Liam's solution
-        # TODO: Replace with Liam's get_training_dataloader after merge
-        # For now, create placeholder that works with his interface
-        
-        data_config = {
-            'jsonl_path': train_data_path,
-            'batch_size': training_config.per_device_train_batch_size,
-            'text_max_length': training_config.max_seq_length,
-            'image_max_patches': 256,  # Standard value
-            'task_name': 'retrieval'
-        }
-        
-        print(f"📊 Data config: {data_config}")
-        
-        # Placeholder: When Liam's code is merged, replace with:
-        # train_dataloader = get_training_dataloader(data_config)
-        
-        # For now, create minimal dataset for structure
-        class PlaceholderDataset:
-            def __init__(self, size):
-                self.size = size
-            def __len__(self):
-                return self.size
-            def __getitem__(self, idx):
-                return {"dummy": True}
-        
-        train_dataset = PlaceholderDataset(8)
+        # ---- NEW: build real dataloader via src.datasets.multimodal_dataset ---- #
+        from src.datasets.multimodal_dataset import get_training_dataloader
+
+        train_dataloader = get_training_dataloader(data_config)
+        train_dataset = train_dataloader.dataset
         
         # Load model and processor
         logger.info("Loading model and processor...")
