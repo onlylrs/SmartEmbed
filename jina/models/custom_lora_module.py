@@ -1,3 +1,6 @@
+# This file is custom implementation - NOT from base model
+# Custom LoRA module for task-specific fine-tuning
+
 from __future__ import annotations
 
 import math

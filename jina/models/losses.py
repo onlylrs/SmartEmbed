@@ -1,5 +1,7 @@
 """
 Loss functions for Jina Embeddings V4 training
+This file is custom implementation - NOT from base model
+Implements contrastive learning and multi-task loss functions
 """
 
 import torch

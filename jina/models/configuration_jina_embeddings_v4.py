@@ -1,3 +1,6 @@
+# This file is from the base model - Jina Embeddings V4 configuration
+# Defines the configuration parameters for the Jina Embeddings V4 model
+
 from transformers.models.qwen2_5_vl import Qwen2_5_VLConfig
 
 from typing import Optional

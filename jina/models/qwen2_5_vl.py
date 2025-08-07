@@ -1,3 +1,5 @@
+# This file is from the base model - Modified Qwen2.5-VL backbone implementation
+# Base transformer architecture with task-specific LoRA support
 # This file is a modified version of the Qwen2_5_VL model from the transformers library
 # that implements task-specific LoRA layers for multi-task embeddings.
 

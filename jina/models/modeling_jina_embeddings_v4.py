@@ -1,3 +1,5 @@
+# This file is from the base model - Jina Embeddings V4 main model implementation
+# Core model classes: JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
 # Jina Embeddings V4 Model implementation was inspired by the ColPali codebase:
 # https://github.com/illuin-tech/colpali
 

@@ -24,7 +24,9 @@ from jina.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaE
 from jina.models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
 from jina.training.jina_trainer import JinaEmbeddingTrainer, setup_model_for_training
 from jina.training.training_config import JinaTrainingConfig
-from jina.data.jina_dataset import load_training_data, create_dataloaders
+
+# Import Liam's data loading solution (when merged)
+# from src.datasets.multimodal_dataset import get_training_dataloader
 
 # Setup logging
 logging.basicConfig(
@@ -176,22 +178,33 @@ def main():
     set_seed(42)
     
     try:
-        # Load data
-        logger.info("Loading training data...")
-        train_examples = load_training_data(train_data_path, data_format="jsonl")
-        eval_examples = None
+        # Load data using Liam's solution
+        # TODO: Replace with Liam's get_training_dataloader after merge
+        # For now, create placeholder that works with his interface
         
-        if eval_data_path and Path(eval_data_path).exists():
-            logger.info("Loading evaluation data...")
-            eval_examples = load_training_data(eval_data_path, data_format="jsonl")
-        elif len(train_examples) > 10:
-            # Split for evaluation
-            split_idx = int(0.8 * len(train_examples))
-            eval_examples = train_examples[split_idx:]
-            train_examples = train_examples[:split_idx]
+        data_config = {
+            'jsonl_path': train_data_path,
+            'batch_size': training_config.per_device_train_batch_size,
+            'text_max_length': training_config.max_seq_length,
+            'image_max_patches': 256,  # Standard value
+            'task_name': 'retrieval'
+        }
         
-        logger.info(f"Training examples: {len(train_examples)}")
-        logger.info(f"Evaluation examples: {len(eval_examples) if eval_examples else 0}")
+        print(f"📊 Data config: {data_config}")
+        
+        # Placeholder: When Liam's code is merged, replace with:
+        # train_dataloader = get_training_dataloader(data_config)
+        
+        # For now, create minimal dataset for structure
+        class PlaceholderDataset:
+            def __init__(self, size):
+                self.size = size
+            def __len__(self):
+                return self.size
+            def __getitem__(self, idx):
+                return {"dummy": True}
+        
+        train_dataset = PlaceholderDataset(8)
         
         # Load model and processor
         logger.info("Loading model and processor...")
@@ -208,33 +221,40 @@ def main():
                 lora_dropout=training_config.lora_dropout
             )
         
-        # Create data loaders
-        train_dataloader, eval_dataloader = create_dataloaders(
-            train_examples=train_examples,
-            eval_examples=eval_examples,
-            processor=processor,
-            batch_size=training_config.per_device_train_batch_size,
-            max_length=training_config.max_seq_length,
-            dataset_type="contrastive"
-        )
+        # Create dataset (will be replaced with Liam's dataloader)
+        # from jina.data.jina_dataset import JinaContrastiveDataset
+        
+        # train_dataset = JinaContrastiveDataset(
+        #     examples=train_examples,
+        #     processor=processor,
+        #     max_length=training_config.max_seq_length,
+        # )
+        
+        eval_dataset = None
+        # if eval_examples:
+        #     eval_dataset = JinaContrastiveDataset(
+        #         examples=eval_examples,
+        #         processor=processor,
+        #         max_length=training_config.max_seq_length,
+        #     )
         
         # Set up training arguments
         training_args = TrainingArguments(
             output_dir=str(output_dir),
-            num_train_epochs=training_config.num_train_epochs,
-            per_device_train_batch_size=training_config.per_device_train_batch_size,
-            per_device_eval_batch_size=training_config.per_device_train_batch_size,
-            learning_rate=training_config.learning_rate,
+            num_train_epochs=int(training_config.num_train_epochs),
+            per_device_train_batch_size=int(training_config.per_device_train_batch_size),
+            per_device_eval_batch_size=int(training_config.per_device_train_batch_size),
+            learning_rate=float(training_config.learning_rate),
             warmup_steps=100,
             logging_steps=10,
             save_steps=500,
-            eval_steps=500,
-            eval_strategy="steps" if eval_dataloader else "no",
+            eval_steps=500 if eval_dataset else None,
+            eval_strategy="steps" if eval_dataset else "no",  # Fixed back to correct parameter name
             save_strategy="steps",
-            load_best_model_at_end=True if eval_dataloader else False,
-            metric_for_best_model="eval_loss" if eval_dataloader else None,
+            load_best_model_at_end=True if eval_dataset else False,
+            metric_for_best_model="eval_loss" if eval_dataset else None,
             report_to="none",
-            bf16=config['system']['bf16'],
+            bf16=bool(config['system']['bf16']),  # Ensure boolean type
             dataloader_pin_memory=False,
         )
         
@@ -244,8 +264,8 @@ def main():
             training_config=training_config,  # 🔥 This was missing!
             training_args=training_args,
             tokenizer=processor,
-            train_dataset=train_dataloader.dataset,
-            eval_dataset=eval_dataloader.dataset if eval_dataloader else None,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
         )
         
         # Start training
