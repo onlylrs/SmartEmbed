@@ -23,6 +23,7 @@ from transformers import TrainingArguments, set_seed
 from jina.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
 from jina.models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
 from jina.training.jina_trainer import JinaEmbeddingTrainer, setup_model_for_training
+from jina.training.training_config import JinaTrainingConfig
 from jina.data.jina_dataset import load_training_data, create_dataloaders
 
 # Setup logging
@@ -66,6 +67,75 @@ def load_config():
     return config
 
 
+def create_training_config(project_config, args):
+    """
+    配置转换桥接函数
+    
+    功能：将用户友好的 project_config.yaml 转换为代码需要的 JinaTrainingConfig 对象
+    
+    转换映射：
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │ project_config.yaml (用户编辑)  →  JinaTrainingConfig (代码使用)    │
+    ├─────────────────────────────────────────────────────────────────────┤
+    │ base_model_path                 →  model_name_or_path               │
+    │ training.epochs                 →  num_train_epochs                 │
+    │ training.batch_size             →  per_device_train_batch_size      │
+    │ training.learning_rate          →  learning_rate                    │
+    │ system.max_seq_length           →  max_seq_length                   │
+    │ lora.*                          →  lora_* (直接映射)                │
+    │ (默认值)                        →  temperature, margin, 等损失函数参数 │
+    └─────────────────────────────────────────────────────────────────────┘
+    
+    为什么需要这个函数：
+    1. JinaEmbeddingTrainer 必须要 JinaTrainingConfig 对象来初始化损失函数
+    2. 用户不应该编辑包含100+参数的复杂配置文件
+    3. 技术参数(如 temperature)使用经过验证的默认值
+    
+    Args:
+        project_config: 从 project_config.yaml 加载的字典
+        args: 命令行参数，可以覆盖配置文件设置
+        
+    Returns:
+        JinaTrainingConfig: 包含所有必需参数的完整配置对象
+    """
+    
+    # Override with command line arguments if provided
+    epochs = args.epochs or project_config['training']['epochs']
+    batch_size = args.batch_size or project_config['training']['batch_size']
+    learning_rate = args.learning_rate or project_config['training']['learning_rate']
+    
+    # Create JinaTrainingConfig with project_config values
+    training_config = JinaTrainingConfig(
+        # Model settings (from project_config)
+        model_name_or_path=project_config['base_model_path'],
+        trust_remote_code=True,
+        
+        # Training hyperparameters (from project_config + args override)
+        output_dir=str(project_root / project_config['training']['output_dir'] / 'finetuned'),
+        num_train_epochs=epochs,
+        per_device_train_batch_size=batch_size,
+        learning_rate=learning_rate,
+        
+        # System settings (from project_config)
+        max_seq_length=project_config['system']['max_seq_length'],
+        
+        # LoRA settings (from project_config)
+        use_lora=project_config['training']['use_lora'],
+        lora_r=project_config['lora']['r'],
+        lora_alpha=project_config['lora']['alpha'],
+        lora_dropout=project_config['lora']['dropout'],
+        
+        # Loss function settings (使用经过验证的默认值)
+        # 这些参数影响对比学习的效果，使用 Jina 推荐的值
+        temperature=0.02,                    # 对比学习温度参数
+        margin=0.0,                         # 损失函数边界
+        matryoshka_dims=[128, 256, 512, 1024],  # 多维度嵌入支持
+        use_matryoshka=False,               # 暂时禁用，专注基础训练
+    )
+    
+    return training_config
+
+
 def main():
     """Main training function"""
     args = parse_args()
@@ -73,28 +143,27 @@ def main():
     # Load configuration
     config = load_config()
     
+    # Create unified training configuration
+    training_config = create_training_config(config, args)
+    
     print("=== Jina Embeddings V4 Training ===")
     print(f"Project root: {project_root}")
-    print(f"Base model path: {config['base_model_path']}")
+    print(f"Base model path: {training_config.model_name_or_path}")
     
     # Validate base model path
-    base_model_path = Path(config['base_model_path'])
+    base_model_path = Path(training_config.model_name_or_path)
     if not base_model_path.exists():
         print(f"❌ Base model path does not exist: {base_model_path}")
         sys.exit(1)
     
-    # Set up training parameters (config file + optional overrides)
+    # Set up training parameters from unified config
     train_data_path = args.train_data or str(project_root / config['data']['processed_dir'] / 'train.jsonl')
     eval_data_path = args.eval_data if args.eval_data else None
     
-    epochs = args.epochs or config['training']['epochs']
-    batch_size = args.batch_size or config['training']['batch_size']
-    learning_rate = args.learning_rate or config['training']['learning_rate']
-    
-    output_dir = project_root / config['training']['output_dir'] / 'finetuned'
+    output_dir = Path(training_config.output_dir)
     
     print(f"📊 Training data: {train_data_path}")
-    print(f"📈 Training config: {epochs} epochs, batch_size={batch_size}, lr={learning_rate}")
+    print(f"📈 Training config: {training_config.num_train_epochs} epochs, batch_size={training_config.per_device_train_batch_size}, lr={training_config.learning_rate}")
     print(f"💾 Output directory: {output_dir}")
     
     # Check training data exists
@@ -130,13 +199,13 @@ def main():
         model = JinaEmbeddingsV4Model.from_pretrained(str(base_model_path))
         
         # Setup model for training
-        if config['training']['use_lora']:
+        if training_config.use_lora:
             model = setup_model_for_training(
                 model,
                 use_lora=True,
-                lora_r=config['lora']['r'],
-                lora_alpha=config['lora']['alpha'],
-                lora_dropout=config['lora']['dropout']
+                lora_r=training_config.lora_r,
+                lora_alpha=training_config.lora_alpha,
+                lora_dropout=training_config.lora_dropout
             )
         
         # Create data loaders
@@ -144,23 +213,23 @@ def main():
             train_examples=train_examples,
             eval_examples=eval_examples,
             processor=processor,
-            batch_size=batch_size,
-            max_length=config['system']['max_seq_length'],
+            batch_size=training_config.per_device_train_batch_size,
+            max_length=training_config.max_seq_length,
             dataset_type="contrastive"
         )
         
         # Set up training arguments
         training_args = TrainingArguments(
             output_dir=str(output_dir),
-            num_train_epochs=epochs,
-            per_device_train_batch_size=batch_size,
-            per_device_eval_batch_size=batch_size,
-            learning_rate=learning_rate,
+            num_train_epochs=training_config.num_train_epochs,
+            per_device_train_batch_size=training_config.per_device_train_batch_size,
+            per_device_eval_batch_size=training_config.per_device_train_batch_size,
+            learning_rate=training_config.learning_rate,
             warmup_steps=100,
             logging_steps=10,
             save_steps=500,
             eval_steps=500,
-            evaluation_strategy="steps" if eval_dataloader else "no",
+            eval_strategy="steps" if eval_dataloader else "no",
             save_strategy="steps",
             load_best_model_at_end=True if eval_dataloader else False,
             metric_for_best_model="eval_loss" if eval_dataloader else None,
@@ -169,13 +238,14 @@ def main():
             dataloader_pin_memory=False,
         )
         
-        # Initialize trainer
+        # Initialize trainer with both TrainingArguments and JinaTrainingConfig
         trainer = JinaEmbeddingTrainer(
             model=model,
-            args=training_args,
+            training_config=training_config,  # 🔥 This was missing!
+            training_args=training_args,
+            tokenizer=processor,
             train_dataset=train_dataloader.dataset,
             eval_dataset=eval_dataloader.dataset if eval_dataloader else None,
-            processor=processor,
         )
         
         # Start training
