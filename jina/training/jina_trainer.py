@@ -356,13 +356,21 @@ def setup_model_for_training_legacy(
     if training_config.use_lora:
         # Check if model is already a PEFT model (from pretrained Jina model)
         if hasattr(model, 'peft_config'):
-            logger.info("Model is already a PEFT model, skipping LoRA configuration")
-            # Force enable training mode to override inference_mode=True from pretrained config
+            logger.info("Model is already a PEFT model, updating PEFT configuration for training")
+            
+            # Force enable training mode and disable inference mode
             model.train()
-            # Enable gradients for all PEFT parameters
+            
+            # Critical: Enable all LoRA parameters for training
             for name, param in model.named_parameters():
                 if 'lora_' in name or 'adapters' in name:
                     param.requires_grad = True
+                    logger.info(f"Enabled gradients for LoRA parameter: {name}")
+            
+            # Also make sure PEFT config is set to training mode
+            for peft_config in model.peft_config.values():
+                peft_config.inference_mode = False
+                logger.info(f"Set PEFT config inference_mode=False for training")
         else:
             # Configure LoRA with corrected target modules
             lora_config = LoraConfig(

@@ -209,6 +209,28 @@ def main():
                 lora_dropout=training_config.lora_dropout
             )
         
+        # Force model into training mode to ensure gradients are computed
+        model.train()
+        
+        # CRITICAL FIX: Force enable ALL LoRA parameters for training
+        lora_params_enabled = 0
+        for name, param in model.named_parameters():
+            if 'lora_' in name:
+                param.requires_grad = True
+                lora_params_enabled += 1
+        
+        # Also disable inference mode in PEFT config
+        if hasattr(model, 'peft_config'):
+            for peft_config in model.peft_config.values():
+                peft_config.inference_mode = False
+        
+        logger.info(f"🔧 Force enabled {lora_params_enabled} LoRA parameters")
+        
+        # Count trainable parameters
+        trainable_count = sum(1 for p in model.parameters() if p.requires_grad)
+        total_params = sum(1 for p in model.parameters())
+        logger.info(f"Total trainable parameters: {trainable_count} / {total_params}")
+        
         # Create dataset (will be replaced with Liam's dataloader)
         # from jina.data.jina_dataset import JinaContrastiveDataset
         
@@ -234,15 +256,16 @@ def main():
             per_device_eval_batch_size=int(training_config.per_device_train_batch_size),
             learning_rate=float(training_config.learning_rate),
             warmup_steps=100,
-            logging_steps=10,
-            save_steps=500,
-            eval_steps=500 if eval_dataset else None,
-            eval_strategy="steps" if eval_dataset else "no",  # Fixed back to correct parameter name
-            save_strategy="steps",
+            logging_steps=50,  # Reduce logging frequency
+            save_steps=1000,   # Reduce save frequency to save disk space
+            eval_steps=1000 if eval_dataset else None,
+            eval_strategy="steps" if eval_dataset else "no",
+            save_strategy="epoch",  # Only save at end of each epoch
+            save_total_limit=2,     # Keep only last 2 checkpoints
             load_best_model_at_end=True if eval_dataset else False,
             metric_for_best_model="eval_loss" if eval_dataset else None,
             report_to="none",
-            bf16=bool(config['system']['bf16']),  # Ensure boolean type
+            bf16=bool(config['system']['bf16']),
             dataloader_pin_memory=False,
             remove_unused_columns=False,  # Critical: Don't remove our columns!
         )
