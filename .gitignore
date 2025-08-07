@@ -86,3 +86,5 @@ docs/_build/
 *.err
 
 config.yaml
+intermediate
+data0
