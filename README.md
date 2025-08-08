@@ -1,194 +1,109 @@
-# Jina Embeddings V4 Research Project
+# SmartEmbed (Jina Embeddings V4 Fine‑Tuning)
 
-## 🎯 项目概述
+Internal research repo for adapting Jina Embeddings V4 (multi‑modal: text + image) with LoRA. Audience: project contributors only (not an end‑user package yet).
 
-本项目基于 Jina Embeddings V4 进行多任务嵌入模型的微调研究，使用 LoRA (Low-Rank Adaptation) 技术进行高效的参数更新。
+## 1. Quick Overview
+- Base model: Jina Embeddings V4 (Qwen2.5-VL backbone + projection heads)
+- Adaptation: Parameter‑efficient via LoRA only (base frozen)
+- Tasks targeted (initial): retrieval (image ↔ text), can extend to text matching / code later
+- Data format: JSONL (each line holds an image path + positive text [+ optional negative])
 
-## 📁 项目结构
-
-### 核心配置文件
+## 2. Key Files
 ```
-project_config.yaml          # 🔧 用户配置接口 (你和Liam编辑这个)
-├─ 基础模型路径
-├─ 训练超参数 (epochs, batch_size, learning_rate)
-├─ LoRA配置
-└─ 系统设置
-
-train.py                     # 🚀 主训练脚本
-├─ 读取 project_config.yaml
-├─ 转换为 JinaTrainingConfig
-└─ 启动训练流程
-```
-
-### Jina 模型架构 (jina/models/)
-
-#### 📋 文件分类
-
-**从 Base Model 复制的文件：**
-- `configuration_jina_embeddings_v4.py` - 模型配置类
-- `modeling_jina_embeddings_v4.py` - 主模型实现
-- `qwen2_5_vl.py` - Qwen2.5-VL 骨干网络
-
-**自定义实现的文件：**
-- `losses.py` - 对比学习损失函数
-- `custom_lora_module.py` - 任务特定的 LoRA 模块
-
-## 🔄 模型数据流链条
-
-### 链条 1: 配置流
-```
-project_config.yaml 
-    ↓ (train.py 读取)
-JinaTrainingConfig 对象
-    ↓ (传递给)
-JinaEmbeddingTrainer
-    ↓ (初始化)
-损失函数 + 训练参数
+project_config.yaml      High‑level editable training config (paths, epochs, LR, LoRA flags)
+local_paths.yaml         (gitignored) Developer local absolute paths (base_model_path)
+train.py                 Orchestrates config → dataloader → trainer → save
+jina/training/jina_trainer.py   Custom Trainer (loss wiring, PEFT handling)
+jina/data/multimodal_dataset.py Data loading + processor freezing
+jina/data/data_collator.py      Maps dataset sample → contrastive batch (query_/positive_)
+jina/models/*                  Model, config, losses, optional custom LoRA hooks
 ```
 
-### 链条 2: 模型初始化流
+## 3. Local Path Handling
+Create `local_paths.yaml` (copy from `local_paths.example.yaml`):
 ```
-1. JinaEmbeddingsV4Config (配置参数)
-    ↓
-2. Qwen2_5_VLModel (基础Transformer)
-    ↓
-3. JinaEmbeddingsV4Model (包装 + 投影层)
-    ↓
-4. LoRA 适配器 (任务特定参数)
-    ↓
-5. JinaEmbeddingTrainer (训练控制)
+base_model_path: /abs/path/to/jina-embeddings-v4-base
 ```
+Nothing else is required unless you add more path keys; code only reads `base_model_path`.
 
-### 链条 3: 训练数据流
+## 4. Branch Workflow
+Current naming convention for personal work:
 ```
-输入文本/图像
-    ↓
-JinaEmbeddingsV4Processor (预处理)
-    ↓
-Qwen2_5_VLModel (编码器)
-    ↓
-投影层 (single_vector_projector/multi_vector_projector)
-    ↓
-嵌入向量
-    ↓
-损失函数 (JinaContrastiveLoss)
-    ↓
-梯度更新 (仅更新 LoRA 参数)
+main        Stable / integrated
+dev/fred    Fred's active development
+dev/liam    Liam's active development
 ```
+Create feature slices off `main` (e.g. `feature/xyz`) if scope is narrow.
 
-## 🧩 模型组件详解
-
-### 1. 配置层 (`configuration_jina_embeddings_v4.py`)
-```python
-JinaEmbeddingsV4Config
-├─ 继承自 Qwen2_5_VLConfig
-├─ 定义模型架构参数
-└─ 设置任务特定配置
+## 5. Data Expectations
+`train.py` expects (by default):
 ```
+data/train.jsonl    # sample lines like:
+{"query_image": "/abs/path/to/image.jpg", "positive": "a cat on a sofa"}
+```
+If images are relative, pass `image_base_dir` via `data_config` or extend loader.
+All images are resized uniformly (currently 448x448) in the dataset for stable token counts.
 
-### 2. 骨干网络 (`qwen2_5_vl.py`)
-```python
-Qwen2_5_VLModel
-├─ 多模态 Transformer 编码器
-├─ 支持文本和图像输入
-├─ 集成 LoRA 适配器
-└─ 输出：隐藏状态 → 投影层
+## 6. Training Flow (Simplified)
+```
+project_config.yaml → create JinaTrainingConfig
+↓
+load & freeze base model + processor
+↓
+MultimodalDataset (text + image) → DataLoader (contrastive batch)
+↓
+Forward (query=image branch, positive=text branch)
+↓
+Contrastive loss (optionally Matryoshka later)
+↓
+Backward (LoRA parameters only)
+↓
+Checkpoint save (model + processor)
 ```
 
-### 3. 主模型 (`modeling_jina_embeddings_v4.py`)
-```python
-JinaEmbeddingsV4Model
-├─ 包装 Qwen2_5_VLModel
-├─ 添加投影层 (single_vector, multi_vector)
-├─ 任务路由逻辑
-└─ 输出：任务特定嵌入向量
-
-JinaEmbeddingsV4Processor
-├─ 文本/图像预处理
-├─ Tokenization
-└─ 数据格式转换
+## 7. Run
 ```
-
-### 4. LoRA 模块 (`custom_lora_module.py`)
-```python
-TaskSpecificLoRAModule
-├─ 任务特定的 LoRA 适配器
-├─ 动态参数路由
-└─ 高效参数更新
-```
-
-### 5. 损失函数 (`losses.py`)
-```python
-JinaContrastiveLoss
-├─ 对比学习损失
-├─ 温度缩放 (temperature)
-└─ 负样本挖掘
-
-JinaMultiTaskLoss
-├─ 多任务联合损失
-└─ 任务权重平衡
-
-JinaMatryoshkaLoss
-├─ 多维度嵌入损失
-└─ 维度递进训练
-```
-
-## 🚀 训练流程
-
-### 1. 初始化阶段
-```bash
+# Activate your environment first
 python train.py
-├─ 加载 project_config.yaml
-├─ 创建 JinaTrainingConfig
-├─ 初始化模型和处理器
-└─ 设置 LoRA 适配器
+```
+Logs will show: samples loaded, LoRA param count, loss progression.
+
+## 8. Verifying Real Training
+Indicators training is genuine:
+- Logged `contrastive_loss` changes over steps
+- Non‑zero `grad_norm` early in training
+- Only LoRA + projector parameters require grad (small trainable count)
+
+## 9. Extending
+| Goal | Where to touch |
+|------|----------------|
+| Add task label routing | `multimodal_dataset.py` (set task_label) + trainer logic |
+| Add hard negatives | Modify dataset to include `negative_text` and adapt collator/trainer |
+| Change image resolution | Dataset `_process_image` (keep consistent sizing) |
+| Add eval phase | Provide eval JSONL + plug into `train.py` (currently skipped) |
+| Switch loss variant | `jina/models/losses.py` |
+
+## 10. Common Pitfalls
+- Missing `local_paths.yaml` → model path error
+- Batch size too small (2) → loss may collapse quickly (add gradient accumulation or increase device batch if memory allows)
+- Relative image paths failing → supply `image_base_dir`
+
+## 11. TODO (Short Horizon)
+- Add evaluation loop hook
+- Optional Matryoshka loss toggle & metrics
+- Better in‑batch negative strategy
+- Lightweight inference script (current `inference.py` removed; re‑introduce later)
+
+## 12. Minimal Inference Sketch (Future)
+```python
+from jina.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
+proc = JinaEmbeddingsV4Processor.from_pretrained("outputs/models/finetuned")
+model = JinaEmbeddingsV4Model.from_pretrained("outputs/models/finetuned")
+emb = model.get_single_vector_embeddings(texts=["hello world"], task_label="retrieval")
 ```
 
-### 2. 训练阶段
-```
-每个训练步骤：
-1. 数据加载 → JinaEmbeddingDataset
-2. 预处理 → JinaEmbeddingsV4Processor  
-3. 模型前向 → JinaEmbeddingsV4Model
-4. 损失计算 → JinaContrastiveLoss
-5. 反向传播 → 仅更新 LoRA 参数
-6. 参数更新 → AdamW 优化器
-```
+## 13. Environment
+See `requirements.txt`. Flash‑Attention is listed; ensure GPU build compatibility. Set CUDA device externally if needed (e.g. `setenv CUDA_VISIBLE_DEVICES 0`).
 
-## 🔧 开发工作分工
-
-### Fred (模型与训练专家)
-- ✅ 训练流程优化 (`train.py`, `jina_trainer.py`)
-- ✅ 模型架构调试 (`modeling_jina_embeddings_v4.py`)
-- ✅ 损失函数实验 (`losses.py`)
-- ✅ 推理接口开发 (`inference.py`)
-
-### Liam (数据与评估专家)  
-- ✅ 数据处理管道 (`jina_dataset.py`, `preprocess.py`)
-- ✅ 评估指标实现 (`evaluate.py`)
-- ✅ 数据集扩展和质量控制
-- ✅ 多任务数据准备
-
-## 📊 快速开始
-
-```bash
-# 1. 编辑配置
-vim project_config.yaml
-
-# 2. 开始训练
-python train.py
-
-# 3. 推理测试
-python inference.py --model_path outputs/models/finetuned --texts "Hello world"
-
-# 4. 评估模型
-python evaluate.py --model_path outputs/models/finetuned
-```
-
-## 🎯 当前状态
-
-- ✅ 配置系统完整打通
-- ✅ 训练流程验证通过
-- ✅ 小数据集测试就绪 (8条训练样本)
-- 🔄 等待大规模数据集准备
-- 🔄 推理系统优化进行中
+---
+Lean internal doc. Expand only when we stabilise external interface.
