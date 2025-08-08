@@ -5,6 +5,7 @@ Training configuration for Jina Embeddings V4 training
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 import torch
+from jina.utils.local_paths import get_path  # new utility
 
 
 @dataclass
@@ -12,7 +13,7 @@ class JinaTrainingConfig:
     """Configuration for Jina Embeddings V4 training"""
     
     # Model settings
-    model_name_or_path: str = "/homes/rliuar/Desktop/FYP/jina-embedding-v4"
+    model_name_or_path: str = get_path("base_model_path") or "./jina-embeddings-v4-base"
     config_name: Optional[str] = None
     tokenizer_name: Optional[str] = None
     cache_dir: Optional[str] = None

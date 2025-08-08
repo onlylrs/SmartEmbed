@@ -70,6 +70,7 @@ temp/
 # Configuration files with sensitive info
 config_local.yaml
 .env.local
+local_paths.yaml
 
 # Jupyter
 .ipynb_checkpoints/

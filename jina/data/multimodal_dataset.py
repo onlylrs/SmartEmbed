@@ -17,10 +17,9 @@ from torch.utils.data import Dataset, DataLoader
 from .data_collator import JinaContrastiveDataCollator
 import numpy as np
 
-# Import Jina components
-import sys
-sys.path.append('/homes/rliuar/Desktop/FYP/SmartEmbed')
+# Import Jina components (avoid hardcoded user paths)
 from jina.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
+from jina.utils.local_paths import get_path  # new utility to fetch local paths
 
 
 logger = logging.getLogger(__name__)
@@ -373,7 +372,7 @@ def load_processor_and_freeze(model_path: str) -> JinaEmbeddingsV4Processor:
 # Factory function for easy integration
 def get_training_dataloader(
     data_config: Dict[str, Any],
-    model_path: str = "/homes/rliuar/Desktop/FYP/jina-embedding-v4"
+    model_path: Optional[str] = None
 ) -> DataLoader:
     """
     Factory function to create training dataloader with config.
@@ -392,6 +391,12 @@ def get_training_dataloader(
     Returns:
         Configured DataLoader
     """
+    # Resolve model path: explicit argument > local_paths.yaml > fallback relative path
+    if model_path is None:
+        model_path = get_path("base_model_path") or Path(__file__).resolve().parents[2] / "jina-embeddings-v4-base"
+        model_path = str(model_path)
+        logger.info(f"Using model path: {model_path}")
+
     # Load processor
     processor = load_processor_and_freeze(model_path)
     
