@@ -18,6 +18,9 @@ sys.path.insert(0, str(project_root))
 
 import torch
 from transformers import TrainingArguments, set_seed
+import os
+from datetime import datetime
+import wandb
 
 # Import our modules
 from jina.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
@@ -159,7 +162,6 @@ def main():
         sys.exit(1)
     
     # Set up training parameters from unified config
-    # Default to data/train.jsonl when --train_data not provided
     train_data_path = args.train_data or str(project_root / 'data' / 'train.jsonl')
     eval_data_path = args.eval_data if args.eval_data else None
 
@@ -248,7 +250,12 @@ def main():
         #         max_length=training_config.max_seq_length,
         #     )
         
-        # Set up training arguments
+        # Derive a readable run name for wandb / logs
+        auto_run_name = training_config.run_name or f"smart-search-fyp-{datetime.now().strftime('%m%d-%H%M')}"
+
+        # Set up training arguments (enable wandb reporting)
+        report_to = ["wandb"] if wandb_enabled else []
+        
         training_args = TrainingArguments(
             output_dir=str(output_dir),
             num_train_epochs=int(training_config.num_train_epochs),
@@ -256,20 +263,53 @@ def main():
             per_device_eval_batch_size=int(training_config.per_device_train_batch_size),
             learning_rate=float(training_config.learning_rate),
             warmup_steps=100,
-            logging_steps=50,  # Reduce logging frequency
-            save_steps=1000,   # Reduce save frequency to save disk space
-            eval_steps=1000 if eval_dataset else None,
-            eval_strategy="steps" if eval_dataset else "no",
-            save_strategy="epoch",  # Only save at end of each epoch
-            save_total_limit=2,     # Keep only last 2 checkpoints
+            logging_steps=10,
+            save_steps=500,
+            eval_steps=500 if eval_dataset else None,
+            eval_strategy="steps" if eval_dataset else "no",  # Fixed back to correct parameter name
+            save_strategy="steps",
             load_best_model_at_end=True if eval_dataset else False,
             metric_for_best_model="eval_loss" if eval_dataset else None,
-            report_to="none",
-            bf16=bool(config['system']['bf16']),
+            report_to=report_to,
+            run_name=auto_run_name,
+            bf16=bool(config['system']['bf16']),  # Ensure boolean type
             dataloader_pin_memory=False,
+            dataloader_num_workers=0,
             remove_unused_columns=False,  # Critical: Don't remove our columns!
         )
+
+        # Initialize Weights & Biases run
+        wandb_entity = os.getenv("WANDB_ENTITY", config.get('wandb', {}).get('entity', "smart-search-fyp"))
+        wandb_project = os.getenv("WANDB_PROJECT", config.get('wandb', {}).get('project', "jina-embeddings-finetune"))
+        wandb_dir = os.getenv("WANDB_DIR", None)
         
+        # Check if wandb is enabled in config
+        wandb_enabled = config.get('wandb', {}).get('enabled', True)
+        
+        if wandb_enabled:
+            print(f"🔄 Initializing wandb with entity={wandb_entity}, project={wandb_project}")
+            wandb.init(
+                project=wandb_project,
+                entity=wandb_entity,
+                dir=wandb_dir,
+                name=training_args.run_name,
+                config={
+                    "model_name_or_path": training_config.model_name_or_path,
+                    "epochs": int(training_config.num_train_epochs),
+                    "batch_size": int(training_config.per_device_train_batch_size),
+                    "learning_rate": float(training_config.learning_rate),
+                    "max_seq_length": int(training_config.max_seq_length),
+                    "use_lora": bool(training_config.use_lora),
+                    "lora_r": int(training_config.lora_r),
+                    "lora_alpha": int(training_config.lora_alpha),
+                    "lora_dropout": float(training_config.lora_dropout),
+                    "temperature": float(training_config.temperature),
+                    "margin": float(training_config.margin),
+                },
+            )
+        else:
+            print("ℹ️ Wandb logging disabled in configuration")
+
         # Initialize trainer with both TrainingArguments and JinaTrainingConfig
         trainer = JinaEmbeddingTrainer(
             model=model,
@@ -292,15 +332,23 @@ def main():
         
         print("🎉 Training completed successfully!")
         print(f"📁 Model saved to: {output_dir}")
+        if wandb_enabled:
+            try:
+                wandb.finish()
+                print("📊 Wandb tracking finalized")
+            except Exception:
+                pass
         
     except Exception as e:
         import traceback
-        full_traceback = traceback.format_exc()
-        logger.error(f"Training failed: {e}")
-        logger.error(f"Full traceback:\n{full_traceback}")
-        print(f"❌ Training failed: {e}")
-        print(f"🔍 Full error traceback:")
-        print(full_traceback)
+        logger.exception("Training failed:")  # logs full traceback
+        print("❌ Training failed – see traceback above.")
+        traceback.print_exc()
+        if wandb_enabled:
+            try:
+                wandb.finish()
+            except Exception:
+                pass
         sys.exit(1)
 
 

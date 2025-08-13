@@ -17,6 +17,12 @@ training:
   learning_rate: 1e-4
   epochs: 1
   use_lora: true
+  
+# wandb配置
+wandb:
+  entity: "smart-search-fyp"
+  project: "jina-embeddings-finetune"
+  enabled: true
 
 # LoRA配置
 lora:
