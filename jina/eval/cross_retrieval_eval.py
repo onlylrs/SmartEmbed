@@ -141,6 +141,21 @@ def compute_directional_recalls(
 
 @torch.inference_mode()
 def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batch_size: int, device: str) -> Dict[str, Dict[str, float]]:
+    """
+    Evaluates a cross-modal retrieval model on a given dataset and computes retrieval metrics.
+    Args:
+        model_path (str): Path to the trained model checkpoint to be evaluated.
+        base_model_path (str | None): Path to the base model (if using PEFT/LoRA), or None if not applicable.
+        jsonl_path (str): Path to the evaluation data in JSONL format.
+        batch_size (int): Batch size to use during evaluation.
+        device (str): Device identifier (e.g., 'cpu', 'cuda', 'cuda:0') on which to run the evaluation.
+    Returns:
+        Dict[str, Dict[str, float]]: A dictionary containing retrieval metrics for each direction (e.g., 'I2T', 'T2I').
+            Each sub-dictionary contains metrics such as recall at various values of k (e.g., 'R@1', 'R@5', etc.).
+    The function loads the specified model, processes the evaluation dataset, computes similarity scores between
+    images and texts, and calculates retrieval metrics (such as recall@k) for both image-to-text (I2T) and
+    text-to-image (T2I) retrieval directions.
+    """
     try:
         print("Loading model...")
         # Set ultra-strict logging during model loading to suppress weight info
