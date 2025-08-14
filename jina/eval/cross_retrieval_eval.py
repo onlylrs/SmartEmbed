@@ -64,6 +64,19 @@ def _find_default_data() -> str:
 
 
 def load_eval_data(jsonl_path: str) -> Tuple[List[str], List[str], Dict[int, set], List[int]]:
+    """
+    Load evaluation data from a JSONL file and organize it for cross-modal retrieval tasks.
+    Each line in the input file should be a JSON object containing at least an image path
+    (under the key "query_image" or "image") and a text (under the key "positive" or "text").
+    Args:
+        jsonl_path (str): Path to the JSONL file containing evaluation data.
+    Returns:
+        Tuple containing:
+            images (List[str]): List of unique image paths, where each index corresponds to an image ID.
+            texts (List[str]): List of all texts, where each index corresponds to a text ID.
+            img_to_text_idxs (Dict[int, set]): Mapping from image index to a set of text indices associated with that image.
+            text_to_img_idx (List[int]): List mapping each text index to its corresponding image index.
+    """
     images: List[str] = []
     texts: List[str] = []
     img_index: Dict[str, int] = {}
