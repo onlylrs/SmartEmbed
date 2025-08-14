@@ -134,20 +134,41 @@ class JinaEmbeddingTrainer(Trainer):
             if not positive_embeddings.requires_grad:
                 logger.warning("Positive embeddings do not require grad. This may cause training issues.")
             
-            contrastive_loss = self.contrastive_loss(
+            # Compute I->T and optionally T->I for symmetric loss
+            loss_i2t = self.contrastive_loss(
                 query_embeddings, positive_embeddings
             )
             
             # Ensure loss requires gradients
-            if not contrastive_loss.requires_grad:
+            if not loss_i2t.requires_grad:
                 logger.error("Contrastive loss does not require grad! Check model parameters.")
                 # Add small regularization to ensure gradients flow
                 regularization = 1e-6 * sum(p.pow(2.0).sum() for p in model.parameters() if p.requires_grad)
-                contrastive_loss = contrastive_loss + regularization
+                loss_i2t = loss_i2t + regularization
                 logger.info("Added regularization to enable gradient computation")
             
-            loss += contrastive_loss
-            loss_dict["contrastive_loss"] = contrastive_loss.item()
+            if getattr(self.training_config, "use_simplified_contrastive", True):
+                # Keep original behavior: only I->T
+                loss += loss_i2t
+                loss_dict["contrastive_loss_i2t"] = loss_i2t.item()
+                # Backward-compatible key
+                loss_dict["contrastive_loss"] = loss_i2t.item()
+            else:
+                # Symmetric: average I->T and T->I
+                loss_t2i = self.contrastive_loss(
+                    positive_embeddings, query_embeddings
+                )
+                # In rare cases ensure it also requires grad
+                if not loss_t2i.requires_grad:
+                    regularization = 1e-6 * sum(p.pow(2.0).sum() for p in model.parameters() if p.requires_grad)
+                    loss_t2i = loss_t2i + regularization
+                symmetric_loss = 0.5 * (loss_i2t + loss_t2i)
+                loss += symmetric_loss
+                loss_dict["contrastive_loss_i2t"] = loss_i2t.item()
+                loss_dict["contrastive_loss_t2i"] = loss_t2i.item()
+                loss_dict["contrastive_loss_symmetric"] = symmetric_loss.item()
+                # Backward-compatible key maps to the final contrastive loss value
+                loss_dict["contrastive_loss"] = symmetric_loss.item()
             
             # Add Matryoshka loss if configured
             if self.training_config.use_matryoshka:
