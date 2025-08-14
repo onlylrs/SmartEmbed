@@ -15,11 +15,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
 # Add project root to Python path
-project_root = Path(__file__).parent
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from jina.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model
-from inference import load_model, encode_texts, encode_images
+from tools.inference import load_model, encode_texts, encode_images
 
 
 def parse_args():

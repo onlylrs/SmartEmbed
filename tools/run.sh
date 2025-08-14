@@ -1,6 +1,8 @@
+#!/bin/bash
 # 进入项目目录（动态获取脚本所在目录）
 SCRIPT_DIR=$(dirname "$(realpath "$0")")
-cd "$SCRIPT_DIR"
+PROJECT_ROOT=$(dirname "$SCRIPT_DIR")  # Get the parent directory of tools
+cd "$PROJECT_ROOT"
 
 # 检查基础模型目录是否存在
 BASE_MODEL_DIR="../jina-embeddings-v4-base"
@@ -10,7 +12,7 @@ if [ ! -d "$BASE_MODEL_DIR" ]; then
     exit 1
 fi
 
-echo "项目目录: $SCRIPT_DIR"
+echo "项目目录: $PROJECT_ROOT"
 echo "基础模型目录: $BASE_MODEL_DIR"
 
 # 设置环境变量以确保输出显示
@@ -31,6 +33,6 @@ echo "=== 开始训练 ==="
 echo "使用新的统一训练脚本..."
 
 # 使用新的主训练脚本
-python train.py 2>&1 | tee outputs/logs/training_output.log
+python tools/train.py 2>&1 | tee outputs/logs/training_output.log
 
 echo "=== 训练完成 ==="
