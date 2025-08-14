@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 # Add project root to Python path
-project_root = Path(__file__).parent
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 import torch
@@ -254,6 +254,8 @@ def main():
         auto_run_name = training_config.run_name or f"smart-search-fyp-{datetime.now().strftime('%m%d-%H%M')}"
 
         # Set up training arguments (enable wandb reporting)
+        # Check if wandb is enabled in config
+        wandb_enabled = config.get('wandb', {}).get('enabled', True)
         report_to = ["wandb"] if wandb_enabled else []
         
         training_args = TrainingArguments(
@@ -282,9 +284,6 @@ def main():
         wandb_entity = os.getenv("WANDB_ENTITY", config.get('wandb', {}).get('entity', "smart-search-fyp"))
         wandb_project = os.getenv("WANDB_PROJECT", config.get('wandb', {}).get('project', "jina-embeddings-finetune"))
         wandb_dir = os.getenv("WANDB_DIR", None)
-        
-        # Check if wandb is enabled in config
-        wandb_enabled = config.get('wandb', {}).get('enabled', True)
         
         if wandb_enabled:
             print(f"🔄 Initializing wandb with entity={wandb_entity}, project={wandb_project}")
