@@ -12,6 +12,7 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 import torch
+import torch.distributed as dist
 
 # Suppress verbose logging from transformers and PEFT during model loading
 logging.getLogger("transformers").setLevel(logging.ERROR)
@@ -139,6 +140,59 @@ def compute_directional_recalls(
     return metrics
 
 
+def _is_dist_avail_and_initialized() -> bool:
+    return dist.is_available() and dist.is_initialized()
+
+
+def _get_rank() -> int:
+    return dist.get_rank() if _is_dist_avail_and_initialized() else 0
+
+
+def _get_world_size() -> int:
+    return dist.get_world_size() if _is_dist_avail_and_initialized() else 1
+
+
+def _partition_indices(n: int, world_size: int, rank: int) -> Tuple[int, int]:
+    # Even partition [start, end) for this rank
+    base = n // world_size
+    rem = n % world_size
+    start = rank * base + min(rank, rem)
+    end = start + base + (1 if rank < rem else 0)
+    return start, end
+
+
+def _init_distributed_if_needed(device: str | None = None) -> str:
+    """Initialize torch.distributed if launched with torchrun. Returns device string for this rank."""
+    if dist.is_available() and ("RANK" in os.environ and "WORLD_SIZE" in os.environ):
+        backend = "nccl" if torch.cuda.is_available() else "gloo"
+        if backend == "nccl":
+            local_rank = int(os.environ.get("LOCAL_RANK", 0))
+            torch.cuda.set_device(local_rank)
+        dist.init_process_group(backend=backend, init_method="env://")
+        if backend == "nccl":
+            dev = f"cuda:{int(os.environ.get('LOCAL_RANK', 0))}"
+        else:
+            dev = device or ("cpu" if not torch.cuda.is_available() else "cuda")
+        return dev
+    # Fallback single-process
+    return device or ("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def _gather_numpy_by_rank(local_array: np.ndarray) -> np.ndarray | None:
+    """Gather numpy arrays from all ranks to rank 0 by concatenation along axis 0.
+    Returns concatenated array on rank 0, and None on other ranks.
+    """
+    world_size = _get_world_size()
+    if world_size == 1:
+        return local_array
+    # Use all_gather_object for variable-sized parts
+    gathered: List[np.ndarray] = [None for _ in range(world_size)]  # type: ignore
+    dist.all_gather_object(gathered, local_array)
+    if _get_rank() == 0:
+        return np.concatenate(gathered, axis=0) if len(gathered) > 0 else None
+    return None
+
+
 @torch.inference_mode()
 def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batch_size: int, device: str) -> Dict[str, Dict[str, float]]:
     """
@@ -156,6 +210,11 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
     images and texts, and calculates retrieval metrics (such as recall@k) for both image-to-text (I2T) and
     text-to-image (T2I) retrieval directions.
     """
+    # Initialize distributed (if torchrun is used). Device may be overridden per-rank.
+    device = _init_distributed_if_needed(device)
+    rank = _get_rank()
+    world_size = _get_world_size()
+
     try:
         print("Loading model...")
         # Set ultra-strict logging during model loading to suppress weight info
@@ -191,7 +250,8 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
             for name, level in original_loggers.items():
                 logging.getLogger(name).setLevel(level)
         
-        print("Model loaded successfully!")
+        if rank == 0:
+            print("Model loaded successfully!")
     finally:
         pass # No explicit cleanup needed for model, it's managed by torch.inference_mode
 
@@ -199,8 +259,29 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
     if len(images) == 0 or len(texts) == 0:
         raise ValueError("No valid images/texts found in dataset")
 
-    img_emb = model.encode_image(images, task="retrieval", batch_size=batch_size, return_numpy=True)
-    txt_emb = model.encode_text(texts, task="retrieval", batch_size=batch_size, prompt_name="query", return_numpy=True)
+    # Partition work across ranks
+    img_s, img_e = _partition_indices(len(images), world_size, rank)
+    txt_s, txt_e = _partition_indices(len(texts), world_size, rank)
+
+    local_images = images[img_s:img_e]
+    local_texts = texts[txt_s:txt_e]
+
+    # Compute local embeddings
+    img_emb_local = model.encode_image(local_images, task="retrieval", batch_size=batch_size, return_numpy=True)
+    txt_emb_local = model.encode_text(local_texts, task="retrieval", batch_size=batch_size, prompt_name="query", return_numpy=True)
+
+    # Gather to rank 0
+    img_emb = _gather_numpy_by_rank(img_emb_local)
+    txt_emb = _gather_numpy_by_rank(txt_emb_local)
+
+    # Only rank 0 computes metrics and returns
+    if rank != 0:
+        # Ensure all ranks sync before exit
+        if _is_dist_avail_and_initialized():
+            dist.barrier()
+        return {}
+
+    assert img_emb is not None and txt_emb is not None
 
     # cosine similarities (embeddings are normalized)
     sim = img_emb @ txt_emb.T
@@ -209,6 +290,11 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
     t2i = compute_directional_recalls(sim, text_to_img_idx=text_to_img_idx, direction="T2I")
 
     mean = {f"mean_{k}": (i2t[k] + t2i[k]) / 2.0 for k in i2t.keys()}
+
+    # Sync before returning
+    if _is_dist_avail_and_initialized():
+        dist.barrier()
+
     return {"I2T": i2t, "T2I": t2i, "mean": mean}
 
 
@@ -229,27 +315,34 @@ def main():
 
     results = evaluate(args.model_path, args.base_model_path, args.data_jsonl, args.batch_size, args.device)
 
-    # Pretty print
-    print("\nCross-Retrieval Evaluation (R@1/5/10/30/50)")
-    print(f"Model: {args.model_path}")
-    print(f"Data:  {args.data_jsonl}\n")
-    for section in ["I2T", "T2I", "mean"]:
-        metrics = results[section]
-        ordered_keys = [k for k in ["R@1", "R@5", "R@10", "R@30", "R@50"] if k in metrics] if section != "mean" else [f"mean_{k}" for k in ["R@1", "R@5", "R@10", "R@30", "R@50"]]
-        kv = ", ".join([f"{k}={metrics[k]:.4f}" for k in ordered_keys])
-        print(f"{section}: {kv}")
+    # Only rank 0 prints/saves
+    if _get_rank() == 0 and results:
+        print("\nCross-Retrieval Evaluation (R@1/5/10/30/50)")
+        print(f"Model: {args.model_path}")
+        print(f"Data:  {args.data_jsonl}\n")
+        for section in ["I2T", "T2I", "mean"]:
+            metrics = results[section]
+            ordered_keys = [k for k in ["R@1", "R@5", "R@10", "R@30", "R@50"] if k in metrics] if section != "mean" else [f"mean_{k}" for k in ["R@1", "R@5", "R@10", "R@30", "R@50"]]
+            kv = ", ".join([f"{k}={metrics[k]:.4f}" for k in ordered_keys])
+            print(f"{section}: {kv}")
 
-    # Save to file
-    Path(args.save_dir).mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out_path = Path(args.save_dir) / f"cross_retrieval_metrics_{ts}.json"
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "model_path": args.model_path,
-            "data_jsonl": args.data_jsonl,
-            "results": results,
-        }, f, indent=2)
-    print(f"\nSaved metrics to: {out_path}")
+    # Save to file (rank 0)
+    if _get_rank() == 0 and results:
+        Path(args.save_dir).mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        out_path = Path(args.save_dir) / f"cross_retrieval_metrics_{ts}.json"
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "model_path": args.model_path,
+                "data_jsonl": args.data_jsonl,
+                "results": results,
+            }, f, indent=2)
+        print(f"\nSaved metrics to: {out_path}")
+
+    # Cleanup distributed
+    if _is_dist_avail_and_initialized():
+        dist.barrier()
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
