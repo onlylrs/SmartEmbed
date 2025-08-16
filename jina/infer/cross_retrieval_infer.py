@@ -117,7 +117,7 @@ def _gather_numpy_by_rank(local_array: np.ndarray) -> np.ndarray | None:
     world_size = _get_world_size()
     if world_size == 1:
         return local_array
-    gathered: List[np.ndarray] = [None for _ in range(world_size)]  # type: ignore
+    gathered: List[np.ndarray | None] = [None for _ in range(world_size)]  # type: ignore
     dist.all_gather_object(gathered, local_array)
     if _get_rank() == 0:
         return np.concatenate(gathered, axis=0) if len(gathered) > 0 else None
