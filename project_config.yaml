@@ -13,9 +13,9 @@ data:
 training:
   output_dir: "outputs/models"
   log_dir: "outputs/logs"
-  batch_size: 2
+  batch_size: 3
   learning_rate: 1e-4
-  epochs: 1
+  epochs: 10
   use_lora: true
   
 # wandb配置
