@@ -66,6 +66,7 @@ class JinaTrainingConfig:
     ])
     lora_bias: str = "none"
     task_names: List[str] = field(default_factory=lambda: ["retrieval", "text-matching", "code"])
+    enable_visual_lora: bool = False
     
     # Jina-specific settings
     single_vector_pool_strategy: str = "mean"
@@ -101,7 +102,7 @@ class JinaTrainingConfig:
     
     # GPU Memory optimization
     dataloader_drop_last: bool = True
-    ddp_find_unused_parameters: bool = False
+    ddp_find_unused_parameters: bool = True
     gradient_checkpointing: bool = True  # Enable gradient checkpointing to save memory
     max_memory_MB: int = 20000  # Limit memory usage per GPU (adjust for 3090s)
     

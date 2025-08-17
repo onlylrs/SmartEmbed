@@ -150,6 +150,10 @@ def main():
     
     # Create unified training configuration
     training_config = create_training_config(config, args)
+
+    # Pre-compute wandb_enabled so that it's always defined, even if an
+    # exception is raised before the later assignment inside the try block.
+    wandb_enabled = config.get('wandb', {}).get('enabled', True)
     
     print("=== Jina Embeddings V4 Training ===")
     print(f"Project root: {project_root}")
@@ -208,7 +212,8 @@ def main():
                 use_lora=True,
                 lora_r=training_config.lora_r,
                 lora_alpha=training_config.lora_alpha,
-                lora_dropout=training_config.lora_dropout
+                lora_dropout=training_config.lora_dropout,
+                enable_visual_lora=getattr(training_config, 'enable_visual_lora', False)
             )
         
         # Force model into training mode to ensure gradients are computed
@@ -255,7 +260,6 @@ def main():
 
         # Set up training arguments (enable wandb reporting)
         # Check if wandb is enabled in config
-        wandb_enabled = config.get('wandb', {}).get('enabled', True)
         report_to = ["wandb"] if wandb_enabled else []
         
         training_args = TrainingArguments(
@@ -282,7 +286,7 @@ def main():
             dataloader_drop_last=getattr(training_config, 'dataloader_drop_last', True),
             # Important for models with branches or conditional paths
             ddp_find_unused_parameters=True,
-            gradient_checkpointing=getattr(training_config, 'gradient_checkpointing', False),
+            gradient_checkpointing=False,  # CRITICAL: Must be disabled for LoRA to work with this model arch.
             local_rank=int(os.environ.get("LOCAL_RANK", -1)),
         )
 

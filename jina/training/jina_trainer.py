@@ -385,6 +385,7 @@ def setup_model_for_training(
     lora_dropout: float = 0.1,
     task_names: List[str] = None,
     adapter_name: str = "retrieval",
+    enable_visual_lora: bool = False,
 ) -> JinaEmbeddingsV4Model:
     """
     Simplified setup function for model training with LoRA adapters
@@ -402,6 +403,15 @@ def setup_model_for_training(
         model = model_or_path
     
     if use_lora:
+        # NOTE: enable_visual_lora is currently a no-op here.  The visual tower in the base
+        # Jina Embeddings V4 model is already frozen for memory reasons.  We accept the
+        # argument so that higher-level callers (tools/train.py) can pass it without
+        # breaking, but we intentionally do not inject LoRA layers into the vision
+        # transformer at this stage.  This avoids changing call signatures that would
+        # require passing task_label through the vision path.  Support can be added
+        # later by matching visual.* linears and applying the same MultiAdapterLinear
+        # mechanism.
+
         # If the model already has PEFT, activate an existing adapter (prefer 'retrieval' or 'default')
         if hasattr(model, 'peft_config'):
             available_adapters = list(getattr(model, 'peft_config', {}).keys())
@@ -437,17 +447,16 @@ def setup_model_for_training(
             model.train()
             return model
 
-        # Plain base model path: add LoRA from scratch
         if task_names is None:
             task_names = ["retrieval", "text-matching", "code"]
+        target_regex = r"(.*(model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(single_vector_projector|multi_vector_projector).*$)"
         lora_config = LoraConfig(
             task_type=TaskType.FEATURE_EXTRACTION,
             r=lora_r,
             lora_alpha=lora_alpha,
             lora_dropout=lora_dropout,
-            # Restrict to text decoder layers only (exclude visual path)
-            target_modules=r".*model\.layers\..*(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)$",
-            modules_to_save=["multi_vector_projector"],
+            target_modules=target_regex,
+            modules_to_save=None,
             inference_mode=False,
         )
         from torch.nn.modules.linear import Linear
@@ -460,7 +469,27 @@ def setup_model_for_training(
             model.set_adapter(adapter_name)
         except Exception:
             pass
-        logger.info("LoRA adapters added to model (decoder) and projector marked trainable")
+        for cfg in getattr(model, 'peft_config', {}).values():
+            if hasattr(cfg, 'inference_mode'):
+                cfg.inference_mode = False
+        for name, param in model.named_parameters():
+            if ('lora_' in name) or ('multi_vector_projector' in name) or ('single_vector_projector' in name):
+                param.requires_grad = True
+        # Make sure all LoRA layers are in unmerged (training) state
+        from peft.tuners.lora import LoraLayer as _LL
+        for mod in model.modules():
+            if isinstance(mod, _LL) and getattr(mod, 'merged', False):
+                try:
+                    mod.unmerge()
+                except Exception:
+                    pass
+            if isinstance(mod, _LL):
+                try:
+                    mod.disable_adapters = False
+                except AttributeError:
+                    logger.warning(f"Could not set disable_adapters=False on {type(mod).__name__}, assuming it's active.")
+                    pass
+        logger.info("LoRA adapters added per official adapter_config targeting; decoder LoRA active and projector trainable")
     
     return model
 
