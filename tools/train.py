@@ -264,6 +264,7 @@ def main():
             per_device_train_batch_size=int(training_config.per_device_train_batch_size),
             per_device_eval_batch_size=int(training_config.per_device_train_batch_size),
             learning_rate=float(training_config.learning_rate),
+            gradient_accumulation_steps=getattr(training_config, 'gradient_accumulation_steps', 1),
             warmup_steps=100,
             logging_steps=10,
             save_steps=500,
@@ -278,6 +279,11 @@ def main():
             dataloader_pin_memory=False,
             dataloader_num_workers=0,
             remove_unused_columns=False,  # Critical: Don't remove our columns!
+            dataloader_drop_last=getattr(training_config, 'dataloader_drop_last', True),
+            # Important for models with branches or conditional paths
+            ddp_find_unused_parameters=True,
+            gradient_checkpointing=getattr(training_config, 'gradient_checkpointing', False),
+            local_rank=int(os.environ.get("LOCAL_RANK", -1)),
         )
 
         # Initialize Weights & Biases run
@@ -285,7 +291,10 @@ def main():
         wandb_project = os.getenv("WANDB_PROJECT", config.get('wandb', {}).get('project', "jina-embeddings-finetune"))
         wandb_dir = os.getenv("WANDB_DIR", None)
         
-        if wandb_enabled:
+        # Initialize wandb only on main process (rank 0)
+        world_size = int(os.environ.get("WORLD_SIZE", "1"))
+        rank = int(os.environ.get("RANK", "0"))
+        if wandb_enabled and (world_size == 1 or rank == 0):
             print(f"🔄 Initializing wandb with entity={wandb_entity}, project={wandb_project}")
             wandb.init(
                 project=wandb_project,
@@ -327,11 +336,13 @@ def main():
         # Save final model
         logger.info(f"Saving final model to {output_dir}")
         trainer.save_model()
-        train_dataloader.dataset.processor.save_pretrained(str(output_dir))
+        # Save processor only on rank 0 to avoid file write collisions
+        if world_size == 1 or rank == 0:
+            train_dataloader.dataset.processor.save_pretrained(str(output_dir))
         
         print("🎉 Training completed successfully!")
         print(f"📁 Model saved to: {output_dir}")
-        if wandb_enabled:
+        if wandb_enabled and (world_size == 1 or rank == 0):
             try:
                 wandb.finish()
                 print("📊 Wandb tracking finalized")
@@ -343,7 +354,7 @@ def main():
         logger.exception("Training failed:")  # logs full traceback
         print("❌ Training failed – see traceback above.")
         traceback.print_exc()
-        if wandb_enabled:
+        if wandb_enabled and (int(os.environ.get("WORLD_SIZE", "1")) == 1 or int(os.environ.get("RANK", "0")) == 0):
             try:
                 wandb.finish()
             except Exception:

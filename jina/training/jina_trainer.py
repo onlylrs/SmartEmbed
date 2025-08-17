@@ -21,12 +21,17 @@ from transformers.trainer_utils import PredictionOutput
 from peft import LoraConfig, get_peft_model, TaskType
 
 from ..models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4ModelOutput
+from ..models.custom_lora_module import MultiAdapterLinear
 from ..models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
 from ..models.losses import JinaContrastiveLoss, JinaMultiTaskLoss, JinaMatryoshkaLoss
 from ..training.training_config import JinaTrainingConfig
 from ..data.data_collator import JinaContrastiveDataCollator
 
 logger = logging.getLogger(__name__)
+from torch.utils.data import DataLoader, RandomSampler
+from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data.dataset import IterableDataset
+import os
 
 
 class JinaEmbeddingTrainer(Trainer):
@@ -103,85 +108,94 @@ class JinaEmbeddingTrainer(Trainer):
             # Fallback to default task
             current_task_label = "retrieval"
         
-        # Forward pass for queries
-        query_outputs = model(
-            task_label=current_task_label,
-            **query_inputs
-        )
+        # Forward pass for queries (image branch) and positives (text branch)
+        query_outputs = model(task_label=current_task_label, **query_inputs)
+        positive_outputs = model(task_label=current_task_label, **positive_inputs)
+
+        # Extract single- and multi-vector embeddings
         if isinstance(query_outputs, JinaEmbeddingsV4ModelOutput):
-            query_embeddings = query_outputs.single_vec_emb
+            query_single = query_outputs.single_vec_emb
+            query_multi = query_outputs.multi_vec_emb
         else:
-            query_embeddings = query_outputs.get("single_vec_emb", None)
-            
-        # Forward pass for positives
-        positive_outputs = model(
-            task_label=current_task_label,
-            **positive_inputs
-        )
+            query_single = query_outputs.get("single_vec_emb", None)
+            query_multi = query_outputs.get("multi_vec_emb", None)
+
         if isinstance(positive_outputs, JinaEmbeddingsV4ModelOutput):
-            positive_embeddings = positive_outputs.single_vec_emb
+            pos_single = positive_outputs.single_vec_emb
+            pos_multi = positive_outputs.multi_vec_emb
         else:
-            positive_embeddings = positive_outputs.get("single_vec_emb", None)
-        
+            pos_single = positive_outputs.get("single_vec_emb", None)
+            pos_multi = positive_outputs.get("multi_vec_emb", None)
+
         loss = 0.0
         loss_dict = {}
-        
-        # Compute contrastive loss
-        if query_embeddings is not None and positive_embeddings is not None:
-            # Ensure embeddings require gradients
-            if not query_embeddings.requires_grad:
-                logger.warning("Query embeddings do not require grad. This may cause training issues.")
-            if not positive_embeddings.requires_grad:
-                logger.warning("Positive embeddings do not require grad. This may cause training issues.")
-            
-            # Compute I->T and optionally T->I for symmetric loss
-            loss_i2t = self.contrastive_loss(
-                query_embeddings, positive_embeddings
-            )
-            
-            # Ensure loss requires gradients
-            if not loss_i2t.requires_grad:
-                logger.error("Contrastive loss does not require grad! Check model parameters.")
-                # Add small regularization to ensure gradients flow
-                regularization = 1e-6 * sum(p.pow(2.0).sum() for p in model.parameters() if p.requires_grad)
-                loss_i2t = loss_i2t + regularization
-                logger.info("Added regularization to enable gradient computation")
-            
-            if getattr(self.training_config, "use_simplified_contrastive", True):
-                # Keep original behavior: only I->T
-                loss += loss_i2t
-                loss_dict["contrastive_loss_i2t"] = loss_i2t.item()
-                # Backward-compatible key
-                loss_dict["contrastive_loss"] = loss_i2t.item()
-            else:
-                # Symmetric: average I->T and T->I
-                loss_t2i = self.contrastive_loss(
-                    positive_embeddings, query_embeddings
-                )
-                # In rare cases ensure it also requires grad
-                if not loss_t2i.requires_grad:
-                    regularization = 1e-6 * sum(p.pow(2.0).sum() for p in model.parameters() if p.requires_grad)
-                    loss_t2i = loss_t2i + regularization
-                symmetric_loss = 0.5 * (loss_i2t + loss_t2i)
-                loss += symmetric_loss
-                loss_dict["contrastive_loss_i2t"] = loss_i2t.item()
-                loss_dict["contrastive_loss_t2i"] = loss_t2i.item()
-                loss_dict["contrastive_loss_symmetric"] = symmetric_loss.item()
-                # Backward-compatible key maps to the final contrastive loss value
-                loss_dict["contrastive_loss"] = symmetric_loss.item()
-            
-            # Add Matryoshka loss if configured
-            if self.training_config.use_matryoshka:
-                matryoshka_loss = self.matryoshka_loss(
-                    query_embeddings, positive_embeddings
-                )
-                loss += matryoshka_loss
-                loss_dict["matryoshka_loss"] = matryoshka_loss.item()
-        else:
-            logger.error("Query or positive embeddings are None!")
-            # Create a loss with gradients
+
+        temperature = getattr(self.training_config, "temperature", 0.02)
+
+        def _info_nce_from_dense_cosine(q: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
+            # q, p: (B, D), assumed L2-normalized so dot==cosine
+            logits = (q @ p.t()) / temperature  # (B, B)
+            labels = torch.arange(logits.size(0), device=logits.device)
+            return torch.nn.functional.cross_entropy(logits, labels)
+
+        def _late_interaction_similarity(q_tokens: torch.Tensor, q_mask: torch.Tensor,
+                                         p_tokens: torch.Tensor, p_mask: torch.Tensor) -> torch.Tensor:
+            # q_tokens, p_tokens: (B, T, D) already L2-normalized; masked positions are zeroed
+            B = q_tokens.size(0)
+            device = q_tokens.device
+            S = q_tokens.new_zeros((B, B))
+            for i in range(B):
+                q_valid_mask = q_mask[i].bool()
+                qi = q_tokens[i][q_valid_mask]  # (t_i, D)
+                t_i = max(int(q_valid_mask.sum().item()), 1)
+                if qi.numel() == 0:
+                    continue
+                for j in range(B):
+                    pj = p_tokens[j][p_mask[j].bool()]  # (t_j, D)
+                    if pj.numel() == 0:
+                        continue
+                    sim_ij = qi @ pj.t()  # (t_i, t_j)
+                    # max over passage tokens per query token, then average over query tokens
+                    s = sim_ij.max(dim=1).values.sum() / t_i
+                    S[i, j] = s
+            return S
+
+        # Validate tensors
+        if query_single is None or pos_single is None or query_multi is None or pos_multi is None:
+            logger.error("Missing embeddings from model outputs. Ensure model returns both single and multi vector embeddings.")
+            # Create a small regularized loss to keep graph
             dummy_loss = sum(p.pow(2.0).sum() for p in model.parameters() if p.requires_grad) * 1e-8
             loss = dummy_loss if dummy_loss.requires_grad else torch.tensor(0.0, requires_grad=True, device=next(model.parameters()).device)
+        else:
+            # Sanity: check grads for single branch
+            if not query_single.requires_grad:
+                logger.warning("Query embeddings (single) do not require grad. Check that LoRA is enabled on the decoder.")
+            if not pos_single.requires_grad:
+                logger.warning("Positive embeddings (single) do not require grad. Check that LoRA is enabled on the decoder.")
+
+            # Single-vector InfoNCE (dense cosine matrix)
+            single_loss = _info_nce_from_dense_cosine(query_single, pos_single)
+            loss_dict["loss_single"] = float(single_loss.detach().item())
+
+            # Multi-vector late-interaction InfoNCE
+            q_mask = query_inputs.get("attention_mask")
+            if q_mask is None:
+                q_mask = query_inputs.get("query_attention_mask")
+            p_mask = positive_inputs.get("attention_mask")
+            if p_mask is None:
+                p_mask = positive_inputs.get("positive_attention_mask")
+            if q_mask is None or p_mask is None:
+                # Fallback: infer mask from non-zero rows
+                q_mask = (query_multi.abs().sum(dim=-1) > 0).to(query_multi.dtype)
+                p_mask = (pos_multi.abs().sum(dim=-1) > 0).to(pos_multi.dtype)
+
+            S_late = _late_interaction_similarity(query_multi, q_mask, pos_multi, p_mask)
+            logits_late = S_late / temperature
+            labels = torch.arange(logits_late.size(0), device=logits_late.device)
+            multi_loss = torch.nn.functional.cross_entropy(logits_late, labels)
+            loss_dict["loss_multi"] = float(multi_loss.detach().item())
+
+            loss = single_loss + multi_loss
         
         # Log losses
         if self.args.logging_steps > 0 and self.state.global_step % self.args.logging_steps == 0:
@@ -196,6 +210,55 @@ class JinaEmbeddingTrainer(Trainer):
             }
         
         return loss
+
+    def get_train_dataloader(self) -> DataLoader:
+        """
+        Build the training dataloader with DistributedSampler when running under torch.distributed.
+        Keeps collate_fn and per-device batch size semantics intact.
+        """
+        if self.train_dataset is None:
+            raise ValueError("Trainer: training requires a train_dataset")
+
+        # IterableDataset: do not use sampler/shuffle here
+        if isinstance(self.train_dataset, IterableDataset):
+            return DataLoader(
+                self.train_dataset,
+                batch_size=self.args.per_device_train_batch_size,
+                collate_fn=self.data_collator,
+                num_workers=self.args.dataloader_num_workers,
+                pin_memory=self.args.dataloader_pin_memory,
+                drop_last=self.args.dataloader_drop_last,
+            )
+
+        # Determine distributed context from env to avoid requiring explicit local_rank flag
+        world_size = int(os.environ.get("WORLD_SIZE", "1"))
+        rank = int(os.environ.get("RANK", "0"))
+
+        if world_size > 1:
+            sampler = DistributedSampler(
+                self.train_dataset,
+                num_replicas=world_size,
+                rank=rank,
+                shuffle=True,
+                seed=self.args.seed,
+                drop_last=self.args.dataloader_drop_last,
+            )
+            shuffle = False
+        else:
+            sampler = None
+            shuffle = True
+
+        dataloader = DataLoader(
+            self.train_dataset,
+            batch_size=self.args.per_device_train_batch_size,
+            sampler=sampler,
+            shuffle=shuffle if sampler is None else False,
+            collate_fn=self.data_collator,
+            num_workers=self.args.dataloader_num_workers,
+            pin_memory=self.args.dataloader_pin_memory,
+            drop_last=self.args.dataloader_drop_last,
+        )
+        return dataloader
 
     def prediction_step(
         self,
@@ -283,17 +346,23 @@ class JinaEmbeddingTrainer(Trainer):
         """
         Save the model and training state
         """
-        
+        # Only save on main process to avoid write collisions under DDP
+        if hasattr(self.args, "should_save") and not self.args.should_save:
+            return
+        if hasattr(self, "is_world_process_zero") and not self.is_world_process_zero():
+            return
+
         if output_dir is None:
             output_dir = self.args.output_dir
             
         os.makedirs(output_dir, exist_ok=True)
         
-        # Save model
-        if hasattr(self.model, 'save_pretrained'):
-            self.model.save_pretrained(output_dir)
+        # Save model (unwrap DDP/Accelerator wrappers if present)
+        model_to_save = self.model.module if hasattr(self.model, 'module') else self.model
+        if hasattr(model_to_save, 'save_pretrained'):
+            model_to_save.save_pretrained(output_dir)
         else:
-            torch.save(self.model.state_dict(), os.path.join(output_dir, "pytorch_model.bin"))
+            torch.save(model_to_save.state_dict(), os.path.join(output_dir, "pytorch_model.bin"))
             
         # Save tokenizer if available
         if hasattr(self, 'tokenizer') and self.tokenizer is not None:
@@ -315,6 +384,7 @@ def setup_model_for_training(
     lora_alpha: int = 16,
     lora_dropout: float = 0.1,
     task_names: List[str] = None,
+    adapter_name: str = "retrieval",
 ) -> JinaEmbeddingsV4Model:
     """
     Simplified setup function for model training with LoRA adapters
@@ -332,28 +402,65 @@ def setup_model_for_training(
         model = model_or_path
     
     if use_lora:
-        # Check if model is already a PEFT model
+        # If the model already has PEFT, activate an existing adapter (prefer 'retrieval' or 'default')
         if hasattr(model, 'peft_config'):
-            logger.info("Model is already a PEFT model, skipping LoRA configuration")
+            available_adapters = list(getattr(model, 'peft_config', {}).keys())
+            chosen = None
+            for cand in (adapter_name, 'retrieval', 'default'):
+                if cand in available_adapters:
+                    chosen = cand
+                    break
+            if chosen is None and available_adapters:
+                chosen = available_adapters[0]
+
+            if chosen is not None:
+                try:
+                    model.set_adapter(chosen)
+                    logger.info(f"Activated PEFT adapter '{chosen}'")
+                except Exception:
+                    pass
+
+            # Make sure adapters are train-mode and not in inference-only
+            for cfg_name, cfg in getattr(model, 'peft_config', {}).items():
+                if hasattr(cfg, 'inference_mode'):
+                    cfg.inference_mode = False
+
+            # Enable gradients for LoRA and projector
+            enabled = 0
+            for name, param in model.named_parameters():
+                if ('lora_' in name) or ('multi_vector_projector' in name):
+                    if not param.requires_grad:
+                        param.requires_grad = True
+                    enabled += 1
+            logger.info(f"Enabled gradients for {enabled} LoRA/projector parameters")
+
             model.train()
             return model
-        
-        # Add LoRA adapters
+
+        # Plain base model path: add LoRA from scratch
         if task_names is None:
             task_names = ["retrieval", "text-matching", "code"]
-        
         lora_config = LoraConfig(
             task_type=TaskType.FEATURE_EXTRACTION,
             r=lora_r,
             lora_alpha=lora_alpha,
             lora_dropout=lora_dropout,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj", 
-                          "gate_proj", "up_proj", "down_proj"],
+            # Restrict to text decoder layers only (exclude visual path)
+            target_modules=r".*model\.layers\..*(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)$",
             modules_to_save=["multi_vector_projector"],
+            inference_mode=False,
         )
-        
+        from torch.nn.modules.linear import Linear
+        from functools import partial
+        lora_config._custom_modules = {  # type: ignore[attr-defined]
+            Linear: partial(MultiAdapterLinear, task_names=task_names)
+        }
         model = get_peft_model(model, lora_config)
-        logger.info("LoRA adapters added to model")
+        try:
+            model.set_adapter(adapter_name)
+        except Exception:
+            pass
+        logger.info("LoRA adapters added to model (decoder) and projector marked trainable")
     
     return model
 
