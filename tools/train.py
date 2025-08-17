@@ -51,6 +51,7 @@ def parse_args():
     # Data arguments (optional, override config)
     parser.add_argument("--train_data", type=str, help="Path to training data")
     parser.add_argument("--eval_data", type=str, help="Path to evaluation data")
+    parser.add_argument("--output_dir", type=str, help="Path to save training outputs")
     
     # Training arguments (optional, override config)
     parser.add_argument("--epochs", type=int, help="Number of training epochs")
@@ -108,6 +109,7 @@ def create_training_config(project_config, args):
     epochs = args.epochs or project_config['training']['epochs']
     batch_size = args.batch_size or project_config['training']['batch_size']
     learning_rate = args.learning_rate or project_config['training']['learning_rate']
+    output_dir = args.output_dir or str(project_root / project_config['training']['output_dir'] / 'finetuned')
     
     # Create JinaTrainingConfig with project_config values
     training_config = JinaTrainingConfig(
@@ -116,7 +118,7 @@ def create_training_config(project_config, args):
         trust_remote_code=True,
         
         # Training hyperparameters (from project_config + args override)
-        output_dir=str(project_root / project_config['training']['output_dir'] / 'finetuned'),
+        output_dir=output_dir,
         num_train_epochs=epochs,
         per_device_train_batch_size=batch_size,
         learning_rate=learning_rate,
