@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-# Add project root to Python path
+# proj root location for later use
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -39,7 +39,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
+# Define command line arguments
 def parse_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description="Train Jina Embeddings V4 model")
@@ -66,7 +66,6 @@ def load_config():
     config_path = project_root / "project_config.yaml"
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
     
@@ -75,11 +74,7 @@ def load_config():
 
 def create_training_config(project_config, args):
     """
-    配置转换桥接函数
-    
-    功能：将用户友好的 project_config.yaml 转换为代码需要的 JinaTrainingConfig 对象
-    
-    转换映射：
+    将用户友好的 project_config.yaml 转换为代码需要的 JinaTrainingConfig 对象
     ┌─────────────────────────────────────────────────────────────────────┐
     │ project_config.yaml (用户编辑)  →  JinaTrainingConfig (代码使用)    │
     ├─────────────────────────────────────────────────────────────────────┤
@@ -91,12 +86,6 @@ def create_training_config(project_config, args):
     │ lora.*                          →  lora_* (直接映射)                │
     │ (默认值)                        →  temperature, margin, 等损失函数参数 │
     └─────────────────────────────────────────────────────────────────────┘
-    
-    为什么需要这个函数：
-    1. JinaEmbeddingTrainer 必须要 JinaTrainingConfig 对象来初始化损失函数
-    2. 用户不应该编辑包含100+参数的复杂配置文件
-    3. 技术参数(如 temperature)使用经过验证的默认值
-    
     Args:
         project_config: 从 project_config.yaml 加载的字典
         args: 命令行参数，可以覆盖配置文件设置
@@ -111,7 +100,7 @@ def create_training_config(project_config, args):
     learning_rate = args.learning_rate or project_config['training']['learning_rate']
     output_dir = args.output_dir or str(project_root / project_config['training']['output_dir'] / 'finetuned')
     
-    # Create JinaTrainingConfig with project_config values
+    # Create and return JinaTrainingConfig with project_config values
     training_config = JinaTrainingConfig(
         # Model settings (from project_config)
         model_name_or_path=project_config['base_model_path'],
@@ -132,16 +121,21 @@ def create_training_config(project_config, args):
         lora_alpha=project_config['lora']['alpha'],
         lora_dropout=project_config['lora']['dropout'],
         
-        # Loss function settings (使用经过验证的默认值)
-        # 这些参数影响对比学习的效果，使用 Jina 推荐的值
-        temperature=0.02,                    # 对比学习温度参数
-        margin=0.0,                         # 损失函数边界
-        matryoshka_dims=[128, 256, 512, 1024],  # 多维度嵌入支持
+        # Loss function settings
+        temperature=0.02,                    
+        margin=0.0,                         
+        matryoshka_dims=[128, 256, 512, 1024],  
         use_matryoshka=False,               # 暂时禁用，专注基础训练
     )
     
     return training_config
-
+    """ 
+    train过程中config的加载和覆盖优先级: 
+    1. 命令行参数
+    2. project_config.yaml
+    3. train中的 hard code 部分 - 用于处理命令行没有相关参数的情况如data/train.jsonl
+    4. training_config.py 中默认值 - JinaTrainingConfig class 为所有para提供了default value
+    """
 
 def main():
     """Main training function"""
@@ -161,13 +155,14 @@ def main():
     print(f"Project root: {project_root}")
     print(f"Base model path: {training_config.model_name_or_path}")
     
-    # Validate base model path
+    # path checking
     base_model_path = Path(training_config.model_name_or_path)
     if not base_model_path.exists():
         print(f"❌ Base model path does not exist: {base_model_path}")
         sys.exit(1)
     
-    # Set up training parameters from unified config
+    # Specify data paths for training and eval
+    # highest priority: cmd line args
     train_data_path = args.train_data or str(project_root / 'data' / 'train.jsonl')
     eval_data_path = args.eval_data if args.eval_data else None
 
@@ -180,10 +175,10 @@ def main():
     # Check training data exists
     if not Path(train_data_path).exists():
         print(f"❌ Training data not found: {train_data_path}")
-        print("💡 Please create training data in the specified path")
         sys.exit(1)
 
-    # Build data_config for loader
+    # pack all configs related to data loading into data_config
+    # later on passed on to get_training_dataloader function
     data_config = {
         "jsonl_path": train_data_path,
         "batch_size": training_config.per_device_train_batch_size,
@@ -192,14 +187,19 @@ def main():
         "task_name": "retrieval",
         "shuffle": True,
         "num_workers": 0,
+        "image_base_dir": config.get('data', {}).get('image_base_dir', None), 
     }
     
     # Set random seed
     set_seed(42)
     
     try:
-        # Load data using Liam's solution
-        # ---- NEW: build real dataloader via src.datasets.multimodal_dataset ---- #
+        """
+        call func get_training_dataloader defined in file multimodal_dataset.py
+        opens the data source specified in data_config, 
+        then creates a new pytorch Dataset containing a processor inside
+        finally Dataset is wrapped in a DataLoader - batching, shuffling
+        """
         train_dataloader = get_training_dataloader(data_config, model_path=str(base_model_path))
         train_dataset = train_dataloader.dataset
         
@@ -216,9 +216,12 @@ def main():
                 lora_alpha=training_config.lora_alpha,
                 lora_dropout=training_config.lora_dropout,
                 enable_visual_lora=getattr(training_config, 'enable_visual_lora', False)
+                # enable 这个待定，目前是config里为false
             )
         
-        # Force model into training mode to ensure gradients are computed
+        # Force model into training mode
+        # train() is defined in pytorch
+        # under training mode: dropout and batchnorm layers are active
         model.train()
         
         # CRITICAL FIX: Force enable ALL LoRA parameters for training
@@ -228,7 +231,7 @@ def main():
                 param.requires_grad = True
                 lora_params_enabled += 1
         
-        # Also disable inference mode in PEFT config
+        # Also disable inference mode in PEFT config if applicable
         if hasattr(model, 'peft_config'):
             for peft_config in model.peft_config.values():
                 peft_config.inference_mode = False
@@ -240,22 +243,7 @@ def main():
         total_params = sum(1 for p in model.parameters())
         logger.info(f"Total trainable parameters: {trainable_count} / {total_params}")
         
-        # Create dataset (will be replaced with Liam's dataloader)
-        # from jina.data.jina_dataset import JinaContrastiveDataset
-        
-        # train_dataset = JinaContrastiveDataset(
-        #     examples=train_examples,
-        #     processor=processor,
-        #     max_length=training_config.max_seq_length,
-        # )
-        
         eval_dataset = None
-        # if eval_examples:
-        #     eval_dataset = JinaContrastiveDataset(
-        #         examples=eval_examples,
-        #         processor=processor,
-        #         max_length=training_config.max_seq_length,
-        #     )
         
         # Derive a readable run name for wandb / logs
         auto_run_name = training_config.run_name or f"smart-search-fyp-{datetime.now().strftime('%m%d-%H%M')}"

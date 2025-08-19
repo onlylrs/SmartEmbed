@@ -9,7 +9,7 @@ NUM_PROC=""               # optional override; if empty, derived from number of 
 # Optional override paths (usually set in project_config.yaml)
 TRAIN_DATA="/project/fyp25_hc2/data/train.jsonl"             # leave empty to use default from tools/train.py
 EVAL_DATA=""              # optional
-OUTPUT_DIR="/project/fyp25_hc2/jina_test_run_liam"             # Optional: Override for the training output directory. If empty, uses default from config.
+OUTPUT_DIR="/project/fyp25_hc2/jina_test_run_fred"             # Optional: Override for the training output directory. If empty, uses default from config.
 
 # Script paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
