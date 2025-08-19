@@ -10,5 +10,6 @@ maintained here.  Run `python -m jina.data.preprocess --help` to see the
 available sub-commands (generic *convert* and *prepare_flickr30k*).
 """
 
-# No public API on purpose
-__all__: list[str] = []
+from typing import List
+
+__all__: List[str] = []

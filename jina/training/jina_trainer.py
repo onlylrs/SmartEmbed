@@ -7,6 +7,7 @@ import json
 import logging
 import torch
 import torch.nn as nn
+import torch.distributed as dist
 from typing import Dict, List, Optional, Union, Tuple, Any
 from dataclasses import dataclass
 
@@ -132,25 +133,88 @@ class JinaEmbeddingTrainer(Trainer):
 
         temperature = getattr(self.training_config, "temperature", 0.02)
 
+        def _is_dist_initialized() -> bool:
+            return dist.is_available() and dist.is_initialized()
+
+        def _concat_all_gather(tensor: torch.Tensor) -> torch.Tensor:
+            """Gather tensors from all ranks and concatenate along dim 0.
+            Gradients only flow to local chunk (standard behavior for DDP contrastive losses).
+            """
+            if not _is_dist_initialized():
+                return tensor
+            world_size = dist.get_world_size()
+            if world_size == 1:
+                return tensor
+            tensors_gather = [torch.zeros_like(tensor) for _ in range(world_size)]
+            dist.all_gather(tensors_gather, tensor)
+            return torch.cat(tensors_gather, dim=0)
+
+        def _gather_concat_keep_local(tensor: torch.Tensor) -> torch.Tensor:
+            """Like concat(all_gather(tensor)) but preserves autograd for the local rank's slice
+            by replacing gathered local copy with the original tensor.
+            """
+            if not _is_dist_initialized():
+                return tensor
+            world_size = dist.get_world_size()
+            if world_size == 1:
+                return tensor
+            gathered = [torch.zeros_like(tensor) for _ in range(world_size)]
+            dist.all_gather(gathered, tensor)
+            rank = dist.get_rank()
+            gathered[rank] = tensor
+            return torch.cat(gathered, dim=0)
+
+        def _pad_to_length_2d(x: torch.Tensor, target_len: int, pad_value: float = 0.0) -> torch.Tensor:
+            # Pad along dim=1 to target_len; x: (B, T) -> (B, target_len)
+            if x.size(1) >= target_len:
+                return x
+            pad_amount = target_len - x.size(1)
+            pad = x.new_full((x.size(0), pad_amount), pad_value)
+            return torch.cat([x, pad], dim=1)
+
+        def _pad_to_length_3d(x: torch.Tensor, target_len: int, pad_value: float = 0.0) -> torch.Tensor:
+            # Pad along dim=1 to target_len; x: (B, T, D) -> (B, target_len, D)
+            if x.size(1) >= target_len:
+                return x
+            pad_amount = target_len - x.size(1)
+            pad = x.new_full((x.size(0), pad_amount, x.size(2)), pad_value)
+            return torch.cat([x, pad], dim=1)
+
         def _info_nce_from_dense_cosine(q: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
-            # q, p: (B, D), assumed L2-normalized so dot==cosine
+            # q: (B, D), p: (B_or_global, D). Both assumed L2-normalized so dot==cosine
+            if _is_dist_initialized() and dist.get_world_size() > 1:
+                local_bs = q.size(0)
+                # Check equal batch size across ranks; if not equal, fall back to local loss
+                bs_t = torch.tensor([local_bs], device=q.device)
+                bs_all = [torch.zeros_like(bs_t) for _ in range(dist.get_world_size())]
+                dist.all_gather(bs_all, bs_t)
+                bs_list = [int(b.item()) for b in bs_all]
+                equal_bs = all(b == bs_list[0] for b in bs_list)
+                if equal_bs:
+                    gathered_p = _gather_concat_keep_local(p)  # (B*world, D)
+                    logits = (q @ gathered_p.t()) / temperature  # (B, B*world)
+                    rank = dist.get_rank()
+                    B = bs_list[0]
+                    labels = torch.arange(local_bs, device=q.device) + rank * B
+                    return torch.nn.functional.cross_entropy(logits, labels)
+                # Fallback to local positives only
             logits = (q @ p.t()) / temperature  # (B, B)
             labels = torch.arange(logits.size(0), device=logits.device)
             return torch.nn.functional.cross_entropy(logits, labels)
 
         def _late_interaction_similarity(q_tokens: torch.Tensor, q_mask: torch.Tensor,
                                          p_tokens: torch.Tensor, p_mask: torch.Tensor) -> torch.Tensor:
-            # q_tokens, p_tokens: (B, T, D) already L2-normalized; masked positions are zeroed
-            B = q_tokens.size(0)
-            device = q_tokens.device
-            S = q_tokens.new_zeros((B, B))
-            for i in range(B):
+            # q_tokens: (Bq, Tq, D), p_tokens: (Bp, Tp, D); already L2-normalized; masked positions are zeroed
+            Bq = q_tokens.size(0)
+            Bp = p_tokens.size(0)
+            S = q_tokens.new_zeros((Bq, Bp))
+            for i in range(Bq):
                 q_valid_mask = q_mask[i].bool()
                 qi = q_tokens[i][q_valid_mask]  # (t_i, D)
                 t_i = max(int(q_valid_mask.sum().item()), 1)
                 if qi.numel() == 0:
                     continue
-                for j in range(B):
+                for j in range(Bp):
                     pj = p_tokens[j][p_mask[j].bool()]  # (t_j, D)
                     if pj.numel() == 0:
                         continue
@@ -189,10 +253,43 @@ class JinaEmbeddingTrainer(Trainer):
                 q_mask = (query_multi.abs().sum(dim=-1) > 0).to(query_multi.dtype)
                 p_mask = (pos_multi.abs().sum(dim=-1) > 0).to(pos_multi.dtype)
 
-            S_late = _late_interaction_similarity(query_multi, q_mask, pos_multi, p_mask)
-            logits_late = S_late / temperature
-            labels = torch.arange(logits_late.size(0), device=logits_late.device)
-            multi_loss = torch.nn.functional.cross_entropy(logits_late, labels)
+            # Late-interaction uses dense token-token sims per pair. For global negatives under DDP,
+            # we gather the passage side tokens and masks across ranks when shapes are consistent.
+            if _is_dist_initialized() and dist.get_world_size() > 1:
+                local_bs = query_multi.size(0)
+                bs_t = torch.tensor([local_bs], device=query_multi.device)
+                bs_all = [torch.zeros_like(bs_t) for _ in range(dist.get_world_size())]
+                dist.all_gather(bs_all, bs_t)
+                bs_list = [int(b.item()) for b in bs_all]
+                if all(b == bs_list[0] for b in bs_list):
+                    # Align sequence lengths across ranks for safe all_gather
+                    local_T = pos_multi.size(1)
+                    T_t = torch.tensor([local_T], device=pos_multi.device)
+                    T_all = [torch.zeros_like(T_t) for _ in range(dist.get_world_size())]
+                    dist.all_gather(T_all, T_t)
+                    max_T = int(torch.stack(T_all).max().item())
+
+                    pos_multi_pad = _pad_to_length_3d(pos_multi, max_T, 0.0)
+                    p_mask_pad = _pad_to_length_2d(p_mask, max_T, 0.0)
+
+                    gathered_p = _gather_concat_keep_local(pos_multi_pad)  # (B*world, T*, D)
+                    gathered_pm = _concat_all_gather(p_mask_pad)           # (B*world, T*)
+                    S_late = _late_interaction_similarity(query_multi, q_mask, gathered_p, gathered_pm)
+                    logits_late = S_late / temperature
+                    rank = dist.get_rank()
+                    B = bs_list[0]
+                    labels = torch.arange(local_bs, device=logits_late.device) + rank * B
+                    multi_loss = torch.nn.functional.cross_entropy(logits_late, labels)
+                else:
+                    S_late = _late_interaction_similarity(query_multi, q_mask, pos_multi, p_mask)
+                    logits_late = S_late / temperature
+                    labels = torch.arange(logits_late.size(0), device=logits_late.device)
+                    multi_loss = torch.nn.functional.cross_entropy(logits_late, labels)
+            else:
+                S_late = _late_interaction_similarity(query_multi, q_mask, pos_multi, p_mask)
+                logits_late = S_late / temperature
+                labels = torch.arange(logits_late.size(0), device=logits_late.device)
+                multi_loss = torch.nn.functional.cross_entropy(logits_late, labels)
             loss_dict["loss_multi"] = float(multi_loss.detach().item())
 
             loss = single_loss + multi_loss

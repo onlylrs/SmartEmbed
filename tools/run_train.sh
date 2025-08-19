@@ -7,9 +7,9 @@ GPUS="0,1,2,3,4,5,6,7"            # e.g., "0" or "0,1,2,3"; for single, first id
 NUM_PROC=""               # optional override; if empty, derived from number of GPUS
 
 # Optional override paths (usually set in project_config.yaml)
-TRAIN_DATA="/project/fyp25_hc2/data/train.jsonl"             # leave empty to use default from tools/train.py
+TRAIN_DATA="/project/fyp25_hc2/data/train0.jsonl"             # leave empty to use default from tools/train.py
 EVAL_DATA=""              # optional
-OUTPUT_DIR="/project/fyp25_hc2/jina_test_run_fred"             # Optional: Override for the training output directory. If empty, uses default from config.
+OUTPUT_DIR="/project/fyp25_hc2/results/jina_test_run_liam0"             # Optional: Override for the training output directory. If empty, uses default from config.
 
 # Script paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
