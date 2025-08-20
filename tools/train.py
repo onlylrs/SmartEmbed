@@ -209,9 +209,21 @@ def create_training_config(project_config, args):
         use_matryoshka=False,               # 暂时禁用，专注基础训练
     # Contrastive toggle: default False (i.e., use symmetric by default per paper). Allow yaml override.
     use_simplified_contrastive=bool(project_config.get('training', {}).get('use_simplified_contrastive', False)),
-    # Loss weights (optional)
-    loss_single_weight=float(project_config.get('training', {}).get('loss_single_weight', 1.0)),
-    loss_multi_weight=float(project_config.get('training', {}).get('loss_multi_weight', 1.0)),
+    # Loss weights (optional) — allow specifying under training or lora section
+    loss_single_weight=float(
+        project_config.get('training', {}).get(
+            'loss_single_weight',
+            project_config.get('lora', {}).get('loss_single_weight', 1.0),
+        )
+    ),
+    loss_multi_weight=float(
+        project_config.get('training', {}).get(
+            'loss_multi_weight',
+            project_config.get('lora', {}).get('loss_multi_weight', 1.0),
+        )
+    ),
+    # Strict freeze guard (optional)
+    strict_freeze=bool(project_config.get('training', {}).get('strict_freeze', False)),
     )
     
     return training_config
@@ -256,6 +268,7 @@ def main():
 
     print(f"📊 Training data: {train_data_path}")
     print(f"📈 Training config: {training_config.num_train_epochs} epochs, batch_size={training_config.per_device_train_batch_size}, lr={training_config.learning_rate}")
+    print(f"⚖️ Using loss weights: single={training_config.loss_single_weight}, multi={training_config.loss_multi_weight}")
     print(f"💾 Output directory: {output_dir}")
 
     # Check training data exists

@@ -102,6 +102,10 @@ class JinaEmbeddingTrainer(Trainer):
                 getattr(self.model, "logit_scale").requires_grad = True
         # Soft clamp range for stability; store bounds for later use
         self._logit_scale_max = float(torch.log(torch.tensor(100.0)))  # ~ ln(100)
+
+        # Strict freeze pre-check: ensure only whitelisted params are trainable
+        if bool(getattr(self.training_config, "strict_freeze", False)):
+            self._assert_strict_freeze(self.model, where="post_init")
     
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -266,57 +270,64 @@ class JinaEmbeddingTrainer(Trainer):
         single_loss = _info_nce_from_dense_cosine(query_single, pos_single) if use_simplified else _info_nce_bidir(query_single, pos_single)
         loss_dict["loss_single"] = float(single_loss.detach().item())
 
+        # Read weights early so we can optionally skip multi loss compute
+        w_single = float(getattr(self.training_config, "loss_single_weight", 1.0))
+        w_multi = float(getattr(self.training_config, "loss_multi_weight", 1.0))
+
         # Multi-vector late-interaction InfoNCE (I->T only for now)
-        # Avoid boolean evaluation on tensors: pick the first non-None mask explicitly
-        q_mask = query_inputs.get("attention_mask")
-        if q_mask is None:
-            q_mask = query_inputs.get("query_attention_mask")
-        p_mask = positive_inputs.get("attention_mask")
-        if p_mask is None:
-            p_mask = positive_inputs.get("positive_attention_mask")
-        if q_mask is None or p_mask is None:
-            q_mask = (query_multi.abs().sum(dim=-1) > 0).to(query_multi.dtype)
-            p_mask = (pos_multi.abs().sum(dim=-1) > 0).to(pos_multi.dtype)
+        # If the multi loss is disabled (weight == 0), skip the heavy compute path entirely.
+        if w_multi <= 0.0:
+            multi_loss = single_loss.new_zeros(())
+            loss_dict["loss_multi"] = 0.0
+        else:
+            # Avoid boolean evaluation on tensors: pick the first non-None mask explicitly
+            q_mask = query_inputs.get("attention_mask")
+            if q_mask is None:
+                q_mask = query_inputs.get("query_attention_mask")
+            p_mask = positive_inputs.get("attention_mask")
+            if p_mask is None:
+                p_mask = positive_inputs.get("positive_attention_mask")
+            if q_mask is None or p_mask is None:
+                q_mask = (query_multi.abs().sum(dim=-1) > 0).to(query_multi.dtype)
+                p_mask = (pos_multi.abs().sum(dim=-1) > 0).to(pos_multi.dtype)
 
-        if _is_dist_initialized() and dist.get_world_size() > 1:
-            local_bs = query_multi.size(0)
-            bs_t = torch.tensor([local_bs], device=query_multi.device)
-            bs_all = [torch.zeros_like(bs_t) for _ in range(dist.get_world_size())]
-            dist.all_gather(bs_all, bs_t)
-            bs_list = [int(b.item()) for b in bs_all]
-            if all(b == bs_list[0] for b in bs_list):
-                local_T = pos_multi.size(1)
-                T_t = torch.tensor([local_T], device=pos_multi.device)
-                T_all = [torch.zeros_like(T_t) for _ in range(dist.get_world_size())]
-                dist.all_gather(T_all, T_t)
-                max_T = int(torch.stack(T_all).max().item())
+            if _is_dist_initialized() and dist.get_world_size() > 1:
+                local_bs = query_multi.size(0)
+                bs_t = torch.tensor([local_bs], device=query_multi.device)
+                bs_all = [torch.zeros_like(bs_t) for _ in range(dist.get_world_size())]
+                dist.all_gather(bs_all, bs_t)
+                bs_list = [int(b.item()) for b in bs_all]
+                if all(b == bs_list[0] for b in bs_list):
+                    local_T = pos_multi.size(1)
+                    T_t = torch.tensor([local_T], device=pos_multi.device)
+                    T_all = [torch.zeros_like(T_t) for _ in range(dist.get_world_size())]
+                    dist.all_gather(T_all, T_t)
+                    max_T = int(torch.stack(T_all).max().item())
 
-                pos_multi_pad = _pad_to_length_3d(pos_multi, max_T, 0.0)
-                p_mask_pad = _pad_to_length_2d(p_mask, max_T, 0.0)
+                    pos_multi_pad = _pad_to_length_3d(pos_multi, max_T, 0.0)
+                    p_mask_pad = _pad_to_length_2d(p_mask, max_T, 0.0)
 
-                gathered_p = _gather_concat_keep_local(pos_multi_pad)
-                gathered_pm = _concat_all_gather(p_mask_pad)
-                S_late = _late_interaction_similarity(query_multi, q_mask, gathered_p, gathered_pm)
-                logits_late = scale * S_late
-                rank = dist.get_rank()
-                B = bs_list[0]
-                labels = torch.arange(local_bs, device=logits_late.device) + rank * B
-                multi_loss = F.cross_entropy(logits_late, labels)
+                    gathered_p = _gather_concat_keep_local(pos_multi_pad)
+                    gathered_pm = _concat_all_gather(p_mask_pad)
+                    S_late = _late_interaction_similarity(query_multi, q_mask, gathered_p, gathered_pm)
+                    logits_late = scale * S_late
+                    rank = dist.get_rank()
+                    B = bs_list[0]
+                    labels = torch.arange(local_bs, device=logits_late.device) + rank * B
+                    multi_loss = F.cross_entropy(logits_late, labels)
+                else:
+                    S_late = _late_interaction_similarity(query_multi, q_mask, pos_multi, p_mask)
+                    logits_late = scale * S_late
+                    labels = torch.arange(logits_late.size(0), device=logits_late.device)
+                    multi_loss = F.cross_entropy(logits_late, labels)
             else:
                 S_late = _late_interaction_similarity(query_multi, q_mask, pos_multi, p_mask)
                 logits_late = scale * S_late
                 labels = torch.arange(logits_late.size(0), device=logits_late.device)
                 multi_loss = F.cross_entropy(logits_late, labels)
-        else:
-            S_late = _late_interaction_similarity(query_multi, q_mask, pos_multi, p_mask)
-            logits_late = scale * S_late
-            labels = torch.arange(logits_late.size(0), device=logits_late.device)
-            multi_loss = F.cross_entropy(logits_late, labels)
-        loss_dict["loss_multi"] = float(multi_loss.detach().item())
+            loss_dict["loss_multi"] = float(multi_loss.detach().item())
 
         # Apply configurable weights
-        w_single = float(getattr(self.training_config, "loss_single_weight", 1.0))
-        w_multi = float(getattr(self.training_config, "loss_multi_weight", 1.0))
         loss = w_single * single_loss + w_multi * multi_loss
 
         # Log losses
@@ -332,6 +343,15 @@ class JinaEmbeddingTrainer(Trainer):
                     self.log({"temperature_tau": current_tau})
                 except Exception:
                     pass
+        # One-time diagnostic: log the resolved loss weights at the beginning
+        if getattr(self.state, "global_step", 0) == 0:
+            try:
+                self.log({
+                    "loss_weight_single": float(w_single),
+                    "loss_weight_multi": float(w_multi),
+                })
+            except Exception:
+                pass
         
         if return_outputs:
             return loss, {
@@ -341,6 +361,55 @@ class JinaEmbeddingTrainer(Trainer):
             }
         
         return loss
+
+    # ---------------- Strict freeze utilities ----------------
+    @staticmethod
+    def _is_whitelisted_trainable(name: str) -> bool:
+        lname = name.lower()
+        if "lora_" in lname:
+            return True
+        if ("multi_vector_projector" in name) or ("single_vector_projector" in name):
+            return True
+        # logit_scale can be attached at root or inside module
+        if name.endswith("logit_scale") or ".logit_scale" in name:
+            return True
+        return False
+
+    def _assert_strict_freeze(self, model: nn.Module, where: str):
+        violations = []
+        for n, p in model.named_parameters():
+            if p.requires_grad and not self._is_whitelisted_trainable(n):
+                violations.append(n)
+        if violations:
+            msg = (
+                f"strict_freeze violation at {where}: found {len(violations)} unexpected trainable params. "
+                f"First few: {violations[:8]}"
+            )
+            logger.error(msg)
+            raise RuntimeError(msg)
+
+    def create_optimizer(self):
+        opt = super().create_optimizer()
+        if bool(getattr(self.training_config, "strict_freeze", False)):
+            # Post-optimizer check: ensure optimizer only has whitelisted params
+            bad = []
+            for group in self.optimizer.param_groups:
+                for p in group["params"]:
+                    # Need parameter name; map via id
+                    # Build a name map lazily
+                    if not hasattr(self, "_param_name_map"):
+                        self._param_name_map = {id(pp): nn for nn, pp in self.model.named_parameters()}
+                    pname = self._param_name_map.get(id(p), "<unknown>")
+                    if not self._is_whitelisted_trainable(pname):
+                        bad.append(pname)
+            if bad:
+                msg = (
+                    f"strict_freeze violation in optimizer: {len(bad)} non-whitelisted params present. "
+                    f"First few: {bad[:8]}"
+                )
+                logger.error(msg)
+                raise RuntimeError(msg)
+        return opt
 
     def get_train_dataloader(self) -> DataLoader:
         """

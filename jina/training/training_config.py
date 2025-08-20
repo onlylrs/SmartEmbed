@@ -115,6 +115,9 @@ class JinaTrainingConfig:
     run_name: Optional[str] = None
     logging_dir: Optional[str] = None
     
+    # Strict freeze guard: if True, only allow {LoRA, projector, logit_scale} to be trainable
+    strict_freeze: bool = False
+
     # Resume training
     resume_from_checkpoint: Optional[str] = None
     ignore_data_skip: bool = False

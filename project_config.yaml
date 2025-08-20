@@ -35,7 +35,7 @@ lora:
 
   # Optional: loss weights
   loss_single_weight: 1.0
-  loss_multi_weight: 1.0
+  loss_multi_weight: 0.0
 # 系统配置
 system:
   bf16: true
