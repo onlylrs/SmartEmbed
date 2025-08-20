@@ -6,8 +6,8 @@ RUN_MODE="distributed"   # "single" or "distributed"
 GPUS="0,1,2,3,4,5,6,7"            # e.g., "0" or "0,1,2,4"; for single, first id is used
 NUM_PROC=""               # optional override; if empty, derived from number of GPUS
 
-DATA_JSONL="/project/fyp25_hc2/data/eval.jsonl"
-MODEL_PATH="/project/fyp25_hc2/results/jina_test_run_liam0"
+DATA_JSONL="/project/fyp25_hc2/data/eval0.jsonl"
+MODEL_PATH="/project/fyp25_hc2/results/jina_test_run_liam0/checkpoint-500"
 BASE_MODEL_PATH="/project/fyp25_hc2/jina-embeddings-v4"
 BATCH_SIZE=4
 DEVICE="cuda"
