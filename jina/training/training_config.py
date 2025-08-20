@@ -77,10 +77,14 @@ class JinaTrainingConfig:
     # Loss function settings
     temperature: float = 0.02
     margin: float = 0.0
+    # Loss weights
+    loss_single_weight: float = 1.0
+    loss_multi_weight: float = 1.0
     use_miner: bool = False
     miner_margin: float = 0.2
     type_of_triplets: str = "all"
     # Whether to use the simplified contrastive loss (I->T only). If False, use symmetric (I<->T averaged)
+    # This toggle can be overriden by the one in project_config.yaml
     use_simplified_contrastive: bool = False
     
     # Contrastive learning settings

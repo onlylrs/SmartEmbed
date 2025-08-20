@@ -100,6 +100,8 @@ class JinaEmbeddingTrainer(Trainer):
                 setattr(self.model, "logit_scale", nn.Parameter(torch.tensor(init_logit_scale)))
             else:
                 getattr(self.model, "logit_scale").requires_grad = True
+    # Soft clamp range for stability; store bounds for later use
+    self._logit_scale_max = float(torch.log(torch.tensor(100.0)))  # ~ ln(100)
     
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -183,13 +185,15 @@ class JinaEmbeddingTrainer(Trainer):
             pad = x.new_full((x.size(0), pad_amount, x.size(2)), pad_value)
             return torch.cat([x, pad], dim=1)
 
-        # Learnable temperature scaling
+        # Learnable temperature scaling (with clamp to avoid blow-up)
         logit_scale = getattr(model, "logit_scale", None)
         if logit_scale is None:
             # Fallback to static temperature
             scale = torch.tensor(1.0 / max(float(getattr(self.training_config, "temperature", 0.07)), 1e-8), device=query_single.device)
         else:
-            scale = logit_scale.exp()
+            # Clamp without in-place on Parameter to keep autograd graph clean
+            clamped = torch.clamp(logit_scale, max=self._logit_scale_max)
+            scale = clamped.exp()
 
         # InfoNCE helpers
         def _info_nce_from_dense_cosine(q: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
@@ -305,12 +309,24 @@ class JinaEmbeddingTrainer(Trainer):
             multi_loss = F.cross_entropy(logits_late, labels)
         loss_dict["loss_multi"] = float(multi_loss.detach().item())
 
-        loss = single_loss + multi_loss
+    # Apply configurable weights
+    w_single = float(getattr(self.training_config, "loss_single_weight", 1.0))
+    w_multi = float(getattr(self.training_config, "loss_multi_weight", 1.0))
+    loss = w_single * single_loss + w_multi * multi_loss
         
         # Log losses
         if self.args.logging_steps > 0 and self.state.global_step % self.args.logging_steps == 0:
+            # Log component losses
             for loss_name, loss_value in loss_dict.items():
                 self.log({loss_name: loss_value})
+            # Log current temperature tau for monitoring (if learnable)
+            logit_scale = getattr(model, "logit_scale", None)
+            if logit_scale is not None:
+                try:
+                    current_tau = float(torch.exp(-torch.clamp(logit_scale.detach(), max=self._logit_scale_max)).item())
+                    self.log({"temperature_tau": current_tau})
+                except Exception:
+                    pass
         
         if return_outputs:
             return loss, {
