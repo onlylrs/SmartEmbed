@@ -134,6 +134,7 @@ class JinaEmbeddingTrainer(Trainer):
         temperature = getattr(self.training_config, "temperature", 0.02)
 
         def _is_dist_initialized() -> bool:
+        use_simplified = getattr(self.training_config, "use_simplified_contrastive", True)
             return dist.is_available() and dist.is_initialized()
 
         def _concat_all_gather(tensor: torch.Tensor) -> torch.Tensor:
@@ -203,6 +204,11 @@ class JinaEmbeddingTrainer(Trainer):
             return torch.nn.functional.cross_entropy(logits, labels)
 
         def _late_interaction_similarity(q_tokens: torch.Tensor, q_mask: torch.Tensor,
+        def _info_nce_bidir(q: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
+            # Row-wise (q as queries), plus column-wise by swapping roles (p as queries)
+            loss_q2p = _info_nce_from_dense_cosine(q, p)
+            loss_p2q = _info_nce_from_dense_cosine(p, q)
+            return 0.5 * (loss_q2p + loss_p2q)
                                          p_tokens: torch.Tensor, p_mask: torch.Tensor) -> torch.Tensor:
             # q_tokens: (Bq, Tq, D), p_tokens: (Bp, Tp, D); already L2-normalized; masked positions are zeroed
             Bq = q_tokens.size(0)
@@ -217,8 +223,11 @@ class JinaEmbeddingTrainer(Trainer):
                 for j in range(Bp):
                     pj = p_tokens[j][p_mask[j].bool()]  # (t_j, D)
                     if pj.numel() == 0:
-                        continue
-                    sim_ij = qi @ pj.t()  # (t_i, t_j)
+            # Single-vector InfoNCE (dense cosine matrix) — symmetric optional
+            if use_simplified:
+                single_loss = _info_nce_from_dense_cosine(query_single, pos_single)
+            else:
+                single_loss = _info_nce_bidir(query_single, pos_single)
                     # max over passage tokens per query token, then average over query tokens
                     s = sim_ij.max(dim=1).values.sum() / t_i
                     S[i, j] = s

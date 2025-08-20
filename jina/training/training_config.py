@@ -81,7 +81,7 @@ class JinaTrainingConfig:
     miner_margin: float = 0.2
     type_of_triplets: str = "all"
     # Whether to use the simplified contrastive loss (I->T only). If False, use symmetric (I<->T averaged)
-    use_simplified_contrastive: bool = True
+    use_simplified_contrastive: bool = False
     
     # Contrastive learning settings
     negative_sampling_strategy: str = "random"  # "random" or "hard"
