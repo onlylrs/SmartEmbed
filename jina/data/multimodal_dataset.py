@@ -40,7 +40,7 @@ class MultimodalDataset(Dataset):
         text_max_length: int = 128,
         image_max_patches: int = 256,
         task_name: str = "retrieval",
-        image_base_dir: Optional[str] = None
+        image_base_dir: Optional[str] = "data/Images"
     ):
         """
         Initialize the dataset.
@@ -57,7 +57,7 @@ class MultimodalDataset(Dataset):
         self.text_max_length = text_max_length
         self.image_max_patches = image_max_patches
         self.task_name = task_name
-        self.image_base_dir = image_base_dir or "data0/Images"
+        self.image_base_dir = image_base_dir
         
         # Load and process data
         self.data = self._load_data(jsonl_path)

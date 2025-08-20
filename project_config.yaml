@@ -1,21 +1,18 @@
 # Jina Embeddings V4 Research Project Configuration
 
 # 基础模型路径（包含预训练的Jina模型）
-base_model_path: "/csproject/fyp25_hc2/jina-embeddings-v4"
+base_model_path: "/project/fyp25_hc2/jina-embeddings-v4"
 
-# 数据配置
+# 数据配置 
 data:
-  raw_dir: "data/raw"
-  processed_dir: "data/processed"  # 定义 train.py 时需要的数据
-  examples_dir: "data/examples"
+  image_base_dir: "data/Images"
 
 # 训练配置
 training:
   output_dir: "outputs/models"
-  log_dir: "outputs/logs"
-  batch_size: 2
+  batch_size: 3
   learning_rate: 1e-4
-  epochs: 1
+  epochs: 30
   use_lora: true
   
 # wandb配置
@@ -32,6 +29,5 @@ lora:
 
 # 系统配置
 system:
-  cuda_visible_devices: 0
   bf16: true
   max_seq_length: 256
