@@ -39,6 +39,87 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# ---- Trainable-params diagnostics ------------------------------------------
+def summarize_trainable_parameters(model) -> dict:
+    """Return a summary of trainable parameters by category and log warnings if unexpected groups are unfrozen.
+
+    Categories:
+      - lora: parameters under LoRA modules (name contains 'lora_')
+      - projector: multi/single vector projector modules
+      - logit_scale: learnable temperature (added later by Trainer)
+      - embeddings: token embedding tables
+      - norms: RMSNorm/LayerNorm weights
+      - vision_backbone: parameters under visual tower
+      - text_backbone: language model (decoder) base weights excluding LoRA
+      - other: anything not matched above
+    """
+    totals = {
+        "total_params": 0,
+        "total_trainable": 0,
+        "lora": 0,
+        "projector": 0,
+        "logit_scale": 0,
+        "embeddings": 0,
+        "norms": 0,
+        "vision_backbone": 0,
+        "text_backbone": 0,
+        "other": 0,
+    }
+
+    def _inc(key, n):
+        totals[key] = totals.get(key, 0) + int(n)
+
+    for name, p in model.named_parameters():
+        n = p.numel()
+        _inc("total_params", n)
+        if not p.requires_grad:
+            continue
+        _inc("total_trainable", n)
+
+        lname = name.lower()
+        if "lora_" in lname:
+            _inc("lora", n)
+        elif "multi_vector_projector" in name or "single_vector_projector" in name:
+            _inc("projector", n)
+        elif name.endswith("logit_scale") or ".logit_scale" in name:
+            _inc("logit_scale", n)
+        elif "embed_tokens" in name or name.endswith(".weight") and ("embedding" in lname):
+            _inc("embeddings", n)
+        elif ("norm" in lname) or ("rmsnorm" in lname) or ("layernorm" in lname) or ("ln_" in lname):
+            _inc("norms", n)
+        elif name.startswith("visual."):
+            _inc("vision_backbone", n)
+        elif name.startswith("language_model.") or name.startswith("model.language_model."):
+            # Exclude obvious LoRA/projector already handled above
+            _inc("text_backbone", n)
+        else:
+            _inc("other", n)
+
+    # Log a concise summary
+    logger.info(
+        "Trainable params summary: total_trainable=%s / total=%s | lora=%s, projector=%s, logit_scale=%s, "
+        "embeddings=%s, norms=%s, vision_backbone=%s, text_backbone=%s, other=%s",
+        f"{totals['total_trainable']:,}", f"{totals['total_params']:,}",
+        f"{totals['lora']:,}", f"{totals['projector']:,}", f"{totals['logit_scale']:,}",
+        f"{totals['embeddings']:,}", f"{totals['norms']:,}", f"{totals['vision_backbone']:,}",
+        f"{totals['text_backbone']:,}", f"{totals['other']:,}",
+    )
+
+    # Invariants we expect for PEFT fine-tuning
+    if totals["embeddings"] > 0:
+        logger.warning("Embedding tables are trainable (%s params) — expected frozen.", f"{totals['embeddings']:,}")
+    if totals["norms"] > 0:
+        logger.warning("Norm layers are trainable (%s params) — expected frozen.", f"{totals['norms']:,}")
+    if totals["vision_backbone"] > 0:
+        logger.warning("Vision backbone has trainable params (%s) — expected frozen.", f"{totals['vision_backbone']:,}")
+    # Text backbone should only be trainable via LoRA; raw backbone weights should remain frozen
+    if totals["text_backbone"] > 0:
+        logger.warning("Text backbone base weights are trainable (%s) — expected frozen (LoRA-only).",
+                       f"{totals['text_backbone']:,}")
+
+    return totals
+
 # Define command line arguments
 def parse_args():
     """Parse command line arguments"""
@@ -247,6 +328,12 @@ def main():
         trainable_count = sum(1 for p in model.parameters() if p.requires_grad)
         total_params = sum(1 for p in model.parameters())
         logger.info(f"Total trainable parameters: {trainable_count} / {total_params}")
+
+        # Detailed breakdown and sanity-checks for trainable params
+        try:
+            summarize_trainable_parameters(model)
+        except Exception as _e:
+            logger.debug("Param summary failed: %s", repr(_e))
         
         eval_dataset = None
         

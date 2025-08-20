@@ -100,8 +100,8 @@ class JinaEmbeddingTrainer(Trainer):
                 setattr(self.model, "logit_scale", nn.Parameter(torch.tensor(init_logit_scale)))
             else:
                 getattr(self.model, "logit_scale").requires_grad = True
-    # Soft clamp range for stability; store bounds for later use
-    self._logit_scale_max = float(torch.log(torch.tensor(100.0)))  # ~ ln(100)
+        # Soft clamp range for stability; store bounds for later use
+        self._logit_scale_max = float(torch.log(torch.tensor(100.0)))  # ~ ln(100)
     
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -267,8 +267,13 @@ class JinaEmbeddingTrainer(Trainer):
         loss_dict["loss_single"] = float(single_loss.detach().item())
 
         # Multi-vector late-interaction InfoNCE (I->T only for now)
-        q_mask = query_inputs.get("attention_mask") or query_inputs.get("query_attention_mask")
-        p_mask = positive_inputs.get("attention_mask") or positive_inputs.get("positive_attention_mask")
+        # Avoid boolean evaluation on tensors: pick the first non-None mask explicitly
+        q_mask = query_inputs.get("attention_mask")
+        if q_mask is None:
+            q_mask = query_inputs.get("query_attention_mask")
+        p_mask = positive_inputs.get("attention_mask")
+        if p_mask is None:
+            p_mask = positive_inputs.get("positive_attention_mask")
         if q_mask is None or p_mask is None:
             q_mask = (query_multi.abs().sum(dim=-1) > 0).to(query_multi.dtype)
             p_mask = (pos_multi.abs().sum(dim=-1) > 0).to(pos_multi.dtype)
@@ -309,11 +314,11 @@ class JinaEmbeddingTrainer(Trainer):
             multi_loss = F.cross_entropy(logits_late, labels)
         loss_dict["loss_multi"] = float(multi_loss.detach().item())
 
-    # Apply configurable weights
-    w_single = float(getattr(self.training_config, "loss_single_weight", 1.0))
-    w_multi = float(getattr(self.training_config, "loss_multi_weight", 1.0))
-    loss = w_single * single_loss + w_multi * multi_loss
-        
+        # Apply configurable weights
+        w_single = float(getattr(self.training_config, "loss_single_weight", 1.0))
+        w_multi = float(getattr(self.training_config, "loss_multi_weight", 1.0))
+        loss = w_single * single_loss + w_multi * multi_loss
+
         # Log losses
         if self.args.logging_steps > 0 and self.state.global_step % self.args.logging_steps == 0:
             # Log component losses
