@@ -8,6 +8,7 @@ import logging
 import torch
 import torch.nn as nn
 import torch.distributed as dist
+import torch.nn.functional as F
 from typing import Dict, List, Optional, Union, Tuple, Any
 from dataclasses import dataclass
 
@@ -82,45 +83,57 @@ class JinaEmbeddingTrainer(Trainer):
             processing_class=tokenizer,  # Use processing_class instead of tokenizer
             **kwargs
         )
+
+        # Add a learnable temperature (logit_scale) parameter to the model so it is optimized with other params.
+        # Initialize from training_config.temperature (tau). We store logit_scale = log(1/tau) and use exp() at runtime.
+        try:
+            init_tau = float(getattr(self.training_config, "temperature", 0.07))
+        except Exception:
+            init_tau = 0.07
+        init_logit_scale = float(torch.log(torch.tensor(1.0 / max(init_tau, 1e-8))))
+        if not hasattr(self.model, "logit_scale"):
+            # Attach as an nn.Parameter on the model so Trainer optimizes it automatically
+            setattr(self.model, "logit_scale", nn.Parameter(torch.tensor(init_logit_scale)))
+        else:
+            # Ensure it's a parameter and requires grad
+            if not isinstance(getattr(self.model, "logit_scale"), nn.Parameter):
+                setattr(self.model, "logit_scale", nn.Parameter(torch.tensor(init_logit_scale)))
+            else:
+                getattr(self.model, "logit_scale").requires_grad = True
     
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Compute the training loss
         """
-        
         # Extract metadata
         task_labels = inputs.pop("task_labels", None)
-        
+
         # Separate query and positive inputs
-        query_inputs = {}
-        positive_inputs = {}
-        
+        query_inputs: Dict[str, Any] = {}
+        positive_inputs: Dict[str, Any] = {}
         for key, value in inputs.items():
-            if key.startswith('query_'):
-                query_inputs[key.replace('query_', '')] = value
-            elif key.startswith('positive_'):
-                positive_inputs[key.replace('positive_', '')] = value
-        
-        # Extract task labels from batch data
+            if key.startswith("query_"):
+                query_inputs[key.replace("query_", "")] = value
+            elif key.startswith("positive_"):
+                positive_inputs[key.replace("positive_", "")] = value
+
+        # Determine current task
         if task_labels is not None and len(task_labels) > 0:
-            # Use the first task label in the batch (assuming all items in batch have same task)
             current_task_label = task_labels[0] if isinstance(task_labels, (list, tuple)) else task_labels
         else:
-            # Fallback to default task
             current_task_label = "retrieval"
-        
-        # Forward pass for queries (image branch) and positives (text branch)
+
+        # Forward passes
         query_outputs = model(task_label=current_task_label, **query_inputs)
         positive_outputs = model(task_label=current_task_label, **positive_inputs)
 
-        # Extract single- and multi-vector embeddings
+        # Extract embeddings
         if isinstance(query_outputs, JinaEmbeddingsV4ModelOutput):
             query_single = query_outputs.single_vec_emb
             query_multi = query_outputs.multi_vec_emb
         else:
             query_single = query_outputs.get("single_vec_emb", None)
             query_multi = query_outputs.get("multi_vec_emb", None)
-
         if isinstance(positive_outputs, JinaEmbeddingsV4ModelOutput):
             pos_single = positive_outputs.single_vec_emb
             pos_multi = positive_outputs.multi_vec_emb
@@ -128,19 +141,13 @@ class JinaEmbeddingTrainer(Trainer):
             pos_single = positive_outputs.get("single_vec_emb", None)
             pos_multi = positive_outputs.get("multi_vec_emb", None)
 
-        loss = 0.0
-        loss_dict = {}
+        loss_dict: Dict[str, float] = {}
 
-        temperature = getattr(self.training_config, "temperature", 0.02)
-
+        # Helper: distributed checks and gathers
         def _is_dist_initialized() -> bool:
-        use_simplified = getattr(self.training_config, "use_simplified_contrastive", True)
             return dist.is_available() and dist.is_initialized()
 
         def _concat_all_gather(tensor: torch.Tensor) -> torch.Tensor:
-            """Gather tensors from all ranks and concatenate along dim 0.
-            Gradients only flow to local chunk (standard behavior for DDP contrastive losses).
-            """
             if not _is_dist_initialized():
                 return tensor
             world_size = dist.get_world_size()
@@ -151,9 +158,6 @@ class JinaEmbeddingTrainer(Trainer):
             return torch.cat(tensors_gather, dim=0)
 
         def _gather_concat_keep_local(tensor: torch.Tensor) -> torch.Tensor:
-            """Like concat(all_gather(tensor)) but preserves autograd for the local rank's slice
-            by replacing gathered local copy with the original tensor.
-            """
             if not _is_dist_initialized():
                 return tensor
             world_size = dist.get_world_size()
@@ -166,7 +170,6 @@ class JinaEmbeddingTrainer(Trainer):
             return torch.cat(gathered, dim=0)
 
         def _pad_to_length_2d(x: torch.Tensor, target_len: int, pad_value: float = 0.0) -> torch.Tensor:
-            # Pad along dim=1 to target_len; x: (B, T) -> (B, target_len)
             if x.size(1) >= target_len:
                 return x
             pad_amount = target_len - x.size(1)
@@ -174,18 +177,27 @@ class JinaEmbeddingTrainer(Trainer):
             return torch.cat([x, pad], dim=1)
 
         def _pad_to_length_3d(x: torch.Tensor, target_len: int, pad_value: float = 0.0) -> torch.Tensor:
-            # Pad along dim=1 to target_len; x: (B, T, D) -> (B, target_len, D)
             if x.size(1) >= target_len:
                 return x
             pad_amount = target_len - x.size(1)
             pad = x.new_full((x.size(0), pad_amount, x.size(2)), pad_value)
             return torch.cat([x, pad], dim=1)
 
+        # Learnable temperature scaling
+        logit_scale = getattr(model, "logit_scale", None)
+        if logit_scale is None:
+            # Fallback to static temperature
+            scale = torch.tensor(1.0 / max(float(getattr(self.training_config, "temperature", 0.07)), 1e-8), device=query_single.device)
+        else:
+            scale = logit_scale.exp()
+
+        # InfoNCE helpers
         def _info_nce_from_dense_cosine(q: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
-            # q: (B, D), p: (B_or_global, D). Both assumed L2-normalized so dot==cosine
+            # L2-normalize explicitly for safety (model already normalizes)
+            q = F.normalize(q, dim=-1)
+            p = F.normalize(p, dim=-1)
             if _is_dist_initialized() and dist.get_world_size() > 1:
                 local_bs = q.size(0)
-                # Check equal batch size across ranks; if not equal, fall back to local loss
                 bs_t = torch.tensor([local_bs], device=q.device)
                 bs_all = [torch.zeros_like(bs_t) for _ in range(dist.get_world_size())]
                 dist.all_gather(bs_all, bs_t)
@@ -193,24 +205,23 @@ class JinaEmbeddingTrainer(Trainer):
                 equal_bs = all(b == bs_list[0] for b in bs_list)
                 if equal_bs:
                     gathered_p = _gather_concat_keep_local(p)  # (B*world, D)
-                    logits = (q @ gathered_p.t()) / temperature  # (B, B*world)
+                    logits = scale * (q @ gathered_p.t())
                     rank = dist.get_rank()
                     B = bs_list[0]
                     labels = torch.arange(local_bs, device=q.device) + rank * B
-                    return torch.nn.functional.cross_entropy(logits, labels)
-                # Fallback to local positives only
-            logits = (q @ p.t()) / temperature  # (B, B)
+                    return F.cross_entropy(logits, labels)
+            logits = scale * (q @ p.t())
             labels = torch.arange(logits.size(0), device=logits.device)
-            return torch.nn.functional.cross_entropy(logits, labels)
+            return F.cross_entropy(logits, labels)
+
+        def _info_nce_bidir(q: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
+            return 0.5 * (_info_nce_from_dense_cosine(q, p) + _info_nce_from_dense_cosine(p, q))
 
         def _late_interaction_similarity(q_tokens: torch.Tensor, q_mask: torch.Tensor,
-        def _info_nce_bidir(q: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
-            # Row-wise (q as queries), plus column-wise by swapping roles (p as queries)
-            loss_q2p = _info_nce_from_dense_cosine(q, p)
-            loss_p2q = _info_nce_from_dense_cosine(p, q)
-            return 0.5 * (loss_q2p + loss_p2q)
                                          p_tokens: torch.Tensor, p_mask: torch.Tensor) -> torch.Tensor:
-            # q_tokens: (Bq, Tq, D), p_tokens: (Bp, Tp, D); already L2-normalized; masked positions are zeroed
+            # Normalize token embeddings
+            q_tokens = F.normalize(q_tokens, dim=-1)
+            p_tokens = F.normalize(p_tokens, dim=-1)
             Bq = q_tokens.size(0)
             Bp = p_tokens.size(0)
             S = q_tokens.new_zeros((Bq, Bp))
@@ -223,12 +234,8 @@ class JinaEmbeddingTrainer(Trainer):
                 for j in range(Bp):
                     pj = p_tokens[j][p_mask[j].bool()]  # (t_j, D)
                     if pj.numel() == 0:
-            # Single-vector InfoNCE (dense cosine matrix) — symmetric optional
-            if use_simplified:
-                single_loss = _info_nce_from_dense_cosine(query_single, pos_single)
-            else:
-                single_loss = _info_nce_bidir(query_single, pos_single)
-                    # max over passage tokens per query token, then average over query tokens
+                        continue
+                    sim_ij = qi @ pj.t()  # (t_i, t_j)
                     s = sim_ij.max(dim=1).values.sum() / t_i
                     S[i, j] = s
             return S
@@ -236,72 +243,69 @@ class JinaEmbeddingTrainer(Trainer):
         # Validate tensors
         if query_single is None or pos_single is None or query_multi is None or pos_multi is None:
             logger.error("Missing embeddings from model outputs. Ensure model returns both single and multi vector embeddings.")
-            # Create a small regularized loss to keep graph
             dummy_loss = sum(p.pow(2.0).sum() for p in model.parameters() if p.requires_grad) * 1e-8
             loss = dummy_loss if dummy_loss.requires_grad else torch.tensor(0.0, requires_grad=True, device=next(model.parameters()).device)
-        else:
-            # Sanity: check grads for single branch
-            if not query_single.requires_grad:
-                logger.warning("Query embeddings (single) do not require grad. Check that LoRA is enabled on the decoder.")
-            if not pos_single.requires_grad:
-                logger.warning("Positive embeddings (single) do not require grad. Check that LoRA is enabled on the decoder.")
+            if return_outputs:
+                return loss, {"query_outputs": query_outputs, "positive_outputs": positive_outputs, "loss_dict": loss_dict}
+            return loss
 
-            # Single-vector InfoNCE (dense cosine matrix)
-            single_loss = _info_nce_from_dense_cosine(query_single, pos_single)
-            loss_dict["loss_single"] = float(single_loss.detach().item())
+        # Sanity: gradients present
+        if not query_single.requires_grad:
+            logger.warning("Query embeddings (single) do not require grad. Check that LoRA is enabled on the decoder.")
+        if not pos_single.requires_grad:
+            logger.warning("Positive embeddings (single) do not require grad. Check that LoRA is enabled on the decoder.")
 
-            # Multi-vector late-interaction InfoNCE
-            q_mask = query_inputs.get("attention_mask")
-            if q_mask is None:
-                q_mask = query_inputs.get("query_attention_mask")
-            p_mask = positive_inputs.get("attention_mask")
-            if p_mask is None:
-                p_mask = positive_inputs.get("positive_attention_mask")
-            if q_mask is None or p_mask is None:
-                # Fallback: infer mask from non-zero rows
-                q_mask = (query_multi.abs().sum(dim=-1) > 0).to(query_multi.dtype)
-                p_mask = (pos_multi.abs().sum(dim=-1) > 0).to(pos_multi.dtype)
+        # Symmetric toggle
+        use_simplified = bool(getattr(self.training_config, "use_simplified_contrastive", True))
 
-            # Late-interaction uses dense token-token sims per pair. For global negatives under DDP,
-            # we gather the passage side tokens and masks across ranks when shapes are consistent.
-            if _is_dist_initialized() and dist.get_world_size() > 1:
-                local_bs = query_multi.size(0)
-                bs_t = torch.tensor([local_bs], device=query_multi.device)
-                bs_all = [torch.zeros_like(bs_t) for _ in range(dist.get_world_size())]
-                dist.all_gather(bs_all, bs_t)
-                bs_list = [int(b.item()) for b in bs_all]
-                if all(b == bs_list[0] for b in bs_list):
-                    # Align sequence lengths across ranks for safe all_gather
-                    local_T = pos_multi.size(1)
-                    T_t = torch.tensor([local_T], device=pos_multi.device)
-                    T_all = [torch.zeros_like(T_t) for _ in range(dist.get_world_size())]
-                    dist.all_gather(T_all, T_t)
-                    max_T = int(torch.stack(T_all).max().item())
+        # Single-vector InfoNCE
+        single_loss = _info_nce_from_dense_cosine(query_single, pos_single) if use_simplified else _info_nce_bidir(query_single, pos_single)
+        loss_dict["loss_single"] = float(single_loss.detach().item())
 
-                    pos_multi_pad = _pad_to_length_3d(pos_multi, max_T, 0.0)
-                    p_mask_pad = _pad_to_length_2d(p_mask, max_T, 0.0)
+        # Multi-vector late-interaction InfoNCE (I->T only for now)
+        q_mask = query_inputs.get("attention_mask") or query_inputs.get("query_attention_mask")
+        p_mask = positive_inputs.get("attention_mask") or positive_inputs.get("positive_attention_mask")
+        if q_mask is None or p_mask is None:
+            q_mask = (query_multi.abs().sum(dim=-1) > 0).to(query_multi.dtype)
+            p_mask = (pos_multi.abs().sum(dim=-1) > 0).to(pos_multi.dtype)
 
-                    gathered_p = _gather_concat_keep_local(pos_multi_pad)  # (B*world, T*, D)
-                    gathered_pm = _concat_all_gather(p_mask_pad)           # (B*world, T*)
-                    S_late = _late_interaction_similarity(query_multi, q_mask, gathered_p, gathered_pm)
-                    logits_late = S_late / temperature
-                    rank = dist.get_rank()
-                    B = bs_list[0]
-                    labels = torch.arange(local_bs, device=logits_late.device) + rank * B
-                    multi_loss = torch.nn.functional.cross_entropy(logits_late, labels)
-                else:
-                    S_late = _late_interaction_similarity(query_multi, q_mask, pos_multi, p_mask)
-                    logits_late = S_late / temperature
-                    labels = torch.arange(logits_late.size(0), device=logits_late.device)
-                    multi_loss = torch.nn.functional.cross_entropy(logits_late, labels)
+        if _is_dist_initialized() and dist.get_world_size() > 1:
+            local_bs = query_multi.size(0)
+            bs_t = torch.tensor([local_bs], device=query_multi.device)
+            bs_all = [torch.zeros_like(bs_t) for _ in range(dist.get_world_size())]
+            dist.all_gather(bs_all, bs_t)
+            bs_list = [int(b.item()) for b in bs_all]
+            if all(b == bs_list[0] for b in bs_list):
+                local_T = pos_multi.size(1)
+                T_t = torch.tensor([local_T], device=pos_multi.device)
+                T_all = [torch.zeros_like(T_t) for _ in range(dist.get_world_size())]
+                dist.all_gather(T_all, T_t)
+                max_T = int(torch.stack(T_all).max().item())
+
+                pos_multi_pad = _pad_to_length_3d(pos_multi, max_T, 0.0)
+                p_mask_pad = _pad_to_length_2d(p_mask, max_T, 0.0)
+
+                gathered_p = _gather_concat_keep_local(pos_multi_pad)
+                gathered_pm = _concat_all_gather(p_mask_pad)
+                S_late = _late_interaction_similarity(query_multi, q_mask, gathered_p, gathered_pm)
+                logits_late = scale * S_late
+                rank = dist.get_rank()
+                B = bs_list[0]
+                labels = torch.arange(local_bs, device=logits_late.device) + rank * B
+                multi_loss = F.cross_entropy(logits_late, labels)
             else:
                 S_late = _late_interaction_similarity(query_multi, q_mask, pos_multi, p_mask)
-                logits_late = S_late / temperature
+                logits_late = scale * S_late
                 labels = torch.arange(logits_late.size(0), device=logits_late.device)
-                multi_loss = torch.nn.functional.cross_entropy(logits_late, labels)
-            loss_dict["loss_multi"] = float(multi_loss.detach().item())
+                multi_loss = F.cross_entropy(logits_late, labels)
+        else:
+            S_late = _late_interaction_similarity(query_multi, q_mask, pos_multi, p_mask)
+            logits_late = scale * S_late
+            labels = torch.arange(logits_late.size(0), device=logits_late.device)
+            multi_loss = F.cross_entropy(logits_late, labels)
+        loss_dict["loss_multi"] = float(multi_loss.detach().item())
 
-            loss = single_loss + multi_loss
+        loss = single_loss + multi_loss
         
         # Log losses
         if self.args.logging_steps > 0 and self.state.global_step % self.args.logging_steps == 0:
@@ -474,9 +478,19 @@ class JinaEmbeddingTrainer(Trainer):
         if hasattr(self, 'tokenizer') and self.tokenizer is not None:
             self.tokenizer.save_pretrained(output_dir)
             
-        # Save training config
+        # Save training config (+ learned temperature if available)
         if self.training_config is not None:
             config_dict = self.training_config.__dict__.copy()
+            # Try to record learned temperature (tau) and raw logit_scale
+            model_to_save = self.model.module if hasattr(self.model, 'module') else self.model
+            if hasattr(model_to_save, 'logit_scale'):
+                try:
+                    logit_scale = float(model_to_save.logit_scale.detach().cpu().item())
+                    tau = float(1.0 / float(torch.exp(torch.tensor(logit_scale)).item()))
+                    config_dict["logit_scale"] = logit_scale
+                    config_dict["learned_temperature"] = tau
+                except Exception:
+                    pass
             with open(os.path.join(output_dir, "training_config.json"), "w") as f:
                 json.dump(config_dict, f, indent=2)
                 

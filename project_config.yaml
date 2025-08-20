@@ -14,6 +14,11 @@ training:
   learning_rate: 1e-4
   epochs: 30
   use_lora: true
+  # Optional: loss controls
+  # temperature is tau; lower -> sharper. This initializes a learnable parameter (logit_scale)
+  temperature: 0.02
+  # If true: use simplified (one-direction) InfoNCE for single-vector; if false: symmetric (default)
+  use_simplified_contrastive: false
   
 # wandb配置
 wandb:

@@ -121,11 +121,13 @@ def create_training_config(project_config, args):
         lora_alpha=project_config['lora']['alpha'],
         lora_dropout=project_config['lora']['dropout'],
         
-        # Loss function settings
-        temperature=0.02,                    
+    # Loss function settings (allow overrides via project_config.training if present)
+    temperature=float(project_config.get('training', {}).get('temperature', 0.02)),                    
         margin=0.0,                         
         matryoshka_dims=[128, 256, 512, 1024],  
         use_matryoshka=False,               # 暂时禁用，专注基础训练
+    # Contrastive toggle: default False (i.e., use symmetric by default per paper). Allow yaml override.
+    use_simplified_contrastive=bool(project_config.get('training', {}).get('use_simplified_contrastive', False)),
     )
     
     return training_config
