@@ -38,7 +38,7 @@ if str(_ROOT) not in sys.path:
 
 from jina.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model
 from jina.utils.local_paths import get_path
-from peft import PeftModel
+from peft import PeftModel, LoraConfig
 
 
 def _default_model_path() -> str:
@@ -62,6 +62,58 @@ def _find_default_data() -> str:
         if c.exists():
             return str(c)
     return ""
+
+
+def _find_adapter_dir(path: str) -> str | None:
+    """Heuristically detect a PEFT/LoRA adapter directory within or equal to `path`.
+    Returns the directory that contains adapter files, or None if not found.
+    """
+    def has_adapter_files(d: str) -> bool:
+        has_cfg = os.path.isfile(os.path.join(d, "adapter_config.json"))
+        has_weight = any(
+            os.path.isfile(os.path.join(d, fn))
+            for fn in ("adapter_model.safetensors", "adapter_model.bin")
+        )
+        return has_cfg or has_weight
+
+    # Direct folder
+    if os.path.isdir(path) and has_adapter_files(path):
+        return path
+
+    # Common subfolders used by PEFT trainers
+    for sub in ["adapters", "adapters/default", "adapter", "lora", "peft"]:
+        d = os.path.join(path, sub)
+        if os.path.isdir(d) and has_adapter_files(d):
+            return d
+
+    return None
+
+
+def _is_full_model_dir(path: str) -> bool:
+    """Detect if `path` looks like a full HF model directory (has actual weights)."""
+    names = [
+        "model.safetensors",
+        "pytorch_model.bin",
+        "model.safetensors.index.json",
+        "pytorch_model.bin.index.json",
+    ]
+    return any(os.path.isfile(os.path.join(path, n)) for n in names)
+
+
+def _adapter_fingerprint(adapter_dir: str) -> str:
+    """Return a lightweight fingerprint for an adapter: size + sha256 of first 1MB."""
+    import hashlib
+    for fn in ("adapter_model.safetensors", "adapter_model.bin"):
+        p = os.path.join(adapter_dir, fn)
+        if os.path.isfile(p):
+            st = os.stat(p)
+            size = st.st_size
+            h = hashlib.sha256()
+            with open(p, "rb") as f:
+                chunk = f.read(1024 * 1024)
+                h.update(chunk)
+            return f"{fn}:{size}:{h.hexdigest()[:12]}"
+    return "<missing-adapter-file>"
 
 
 def load_eval_data(jsonl_path: str) -> Tuple[List[str], List[str], Dict[int, set], List[int]]:
@@ -216,7 +268,21 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
     world_size = _get_world_size()
 
     try:
-        print("Loading model...")
+        # Pre-compute loading mode and log it (outside suppressed stdout)
+        is_full = _is_full_model_dir(model_path)
+        adapter_dir = None if is_full else _find_adapter_dir(model_path)
+        if rank == 0:
+            print("Loading model...")
+            if is_full:
+                print(f"- Detected full model directory: {model_path}")
+            else:
+                if adapter_dir:
+                    print(f"- Using base model: {base_model_path}")
+                    print(f"- Applying adapters from: {adapter_dir}")
+                    print(f"- Adapter fingerprint: {_adapter_fingerprint(adapter_dir)}")
+                else:
+                    print(f"- No adapter files found under: {model_path}")
+
         # Set ultra-strict logging during model loading to suppress weight info
         original_loggers = {}
         logger_names = [
@@ -234,16 +300,31 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
         try:
             # Use stdout/stderr redirection to suppress all weight loading messages
             with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
-                # Determine whether model_path already contains full model (config.json)
-                if os.path.isfile(os.path.join(model_path, "config.json")):
+                if is_full:
                     model = JinaEmbeddingsV4Model.from_pretrained(model_path, trust_remote_code=True).to(device)
                 else:
-                    if base_model_path is None:
-                        raise ValueError("base_model_path must be provided when model_path does not contain a full model")
+                    if adapter_dir is None:
+                        raise ValueError(
+                            f"`model_path` does not contain model weights and no adapter files were found.\n"
+                            f"Checked: {model_path}\n"
+                            f"Expect one of ['adapter_model.safetensors', 'adapter_model.bin'] and 'adapter_config.json'"
+                        )
+                    if not base_model_path:
+                        raise ValueError("base_model_path must be provided when using LoRA/PEFT adapters")
                     base = JinaEmbeddingsV4Model.from_pretrained(base_model_path, trust_remote_code=True).to(device)
-                    # adapter_dir = adapters subdir if exists else model_path
-                    adapter_dir = os.path.join(model_path, "adapters") if os.path.isdir(os.path.join(model_path, "adapters")) else model_path
-                    model = PeftModel.from_pretrained(base, adapter_dir).to(device)
+                    # If base already comes as a PeftModel (it will, per Jina's implementation),
+                    # load our adapter into it and activate explicitly. Otherwise, wrap with PEFT.
+                    if isinstance(base, PeftModel):
+                        adapter_name = "eval_adapter"
+                        base.load_adapter(adapter_dir, adapter_name=adapter_name)
+                        base.set_adapter(adapter_name)
+                        model = base
+                    else:
+                        lora_cfg = None
+                        cfg_path = os.path.join(adapter_dir, "adapter_config.json")
+                        if os.path.isfile(cfg_path):
+                            lora_cfg = LoraConfig.from_pretrained(adapter_dir)
+                        model = PeftModel.from_pretrained(base, adapter_dir, config=lora_cfg).to(device)
                 model.task = "retrieval"
         finally:
             # Restore original logging levels
@@ -251,7 +332,25 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
                 logging.getLogger(name).setLevel(level)
         
         if rank == 0:
-            print("Model loaded successfully!")
+            try:
+                name_or_path = getattr(getattr(model, "config", object()), "_name_or_path", "<unknown>")
+            except Exception:
+                name_or_path = "<unknown>"
+            is_peft = hasattr(model, "peft_config")
+            active_adapter = None
+            available_adapters = []
+            try:
+                if is_peft:
+                    # peft_config is a dict name->cfg
+                    available_adapters = list(getattr(model, "peft_config", {}).keys())
+                    # active adapter name is stored in model.active_adapter for LoRA
+                    active_adapter = getattr(model, "active_adapter", None)
+            except Exception:
+                pass
+            print(
+                f"Model loaded successfully! name_or_path={name_or_path}, peft={is_peft}, "
+                f"active_adapter={active_adapter}, adapters={available_adapters}"
+            )
     finally:
         pass # No explicit cleanup needed for model, it's managed by torch.inference_mode
 
