@@ -1,0 +1,38 @@
+#!/bin/bash
+#SBATCH --job-name=jina_train
+#SBATCH --partition=normal               # 或 preempt（免费但可被中断）
+#SBATCH --nodes=1                        # 单机多卡，只需 1 个节点
+#SBATCH --ntasks-per-node=1              # 只启动一个任务（torchrun 会管理多进程）
+#SBATCH --gres=gpu:8                     # 请求 8 个 GPU（DGX 节点有 8 个）
+#SBATCH --time=infinite                  # normal 分区支持无限时长
+#SBATCH --output=%x-%j.out               # 输出日志文件名
+#SBATCH --error=%x-%j.err
+
+# 可选：邮件通知
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=fredliam99@hotmail.com
+
+# === 加载环境 ===
+module load anaconda3/2023.09-0 
+source activate FYP2526_qwen
+
+# === 设置路径 ===
+SCRIPT_DIR="/project/fyp25_hc2/scripts"    # 你的脚本所在路径
+REPO_ROOT="/home/shebd/4_Collaboration/FYP2526"
+ENTRYPOINT="${REPO_ROOT}/tools/train.py"
+
+TRAIN_DATA="/project/medimgfmod/Generalist/shebd/openi_data_generation_parsed_copy.jsonl" # 改
+EVAL_DATA="" # 改
+OUTPUT_DIR="/project/fyp25_hc2/results/jina_test_run_liam1" # 改
+
+# === 启动训练 ===
+cd "$REPO_ROOT"
+
+# 使用 torchrun，nproc 自动从 GPU 数量获取
+srun torchrun \
+    --nproc_per_node=$SLURM_GPUS_ON_NODE \
+    --standalone \
+    "$ENTRYPOINT" \
+    --train_data "$TRAIN_DATA" \
+    --output_dir "$OUTPUT_DIR" \
+    ${EVAL_DATA:+--eval_data "$EVAL_DATA"}
