@@ -13,15 +13,15 @@
 #SBATCH --mail-user=fredliam99@hotmail.com
 
 # === 加载环境 ===
-module load anaconda3/2023.09-0 
-source activate FYP2526_qwen
+source /cm/shared/apps/Anaconda3/2023.09-0/etc/profile.d/conda.sh
+conda activate FYP2526_qwen
 
 # === 设置路径 ===
-SCRIPT_DIR="/project/fyp25_hc2/scripts"    # 你的脚本所在路径
-REPO_ROOT="/home/shebd/4_Collaboration/FYP2526"
+SCRIPT_DIR="/home/shebd/4_Collaboration/FYP2526"    # 你的脚本所在路径
+REPO_ROOT="/home/shebd/4_Collaboration/FYP2526/SmartEmbed_liam"
 ENTRYPOINT="${REPO_ROOT}/tools/train.py"
 
-TRAIN_DATA="/project/medimgfmod/Generalist/shebd/openi_data_generation_parsed_copy.jsonl"
+TRAIN_DATA="/home/shebd/4_Collaboration/FYP2526/data/openi_retrieval.jsonl"
 EVAL_DATA=""
 OUTPUT_DIR="/home/shebd/4_Collaboration/FYP2526/output/models/run_0"
 
