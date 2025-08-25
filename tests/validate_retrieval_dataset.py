@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """
-OpenI Dataset Validation Script
+Retrieval Dataset Validation Script
 
-This script validates the OpenI dataset by:
+This script validates the retrieval-format JSONL dataset by:
 1. Checking if the images root directory exists
-2. Analyzing the structure and statistics of the JSONL metadata file  
+2. Analyzing the structure and statistics of the retrieval JSONL metadata file  
 3. Checking if image files referenced in metadata actually exist on disk
-
-The script uses a hard-coded images root directory (/scratch/medimgfmod/Generalist/medical)
-and constructs full paths by combining this root with the 'image' field from each JSONL record.
+4. Validating the retrieval format: {"text": "...", "image": "path", "task": "retrieval"}
 
 Usage:
-    python validate_openi_dataset.py [--verbose]
+    python validate_retrieval_dataset.py [--verbose] [--jsonl PATH]
 """
 
 import argparse
@@ -28,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # Dataset paths
 IMAGES_ROOT = "/scratch/medimgfmod/Generalist/medical"
-METADATA_JSONL = "/project/medimgfmod/Generalist/shebd/openi_data_generation_parsed_copy.jsonl"
+DEFAULT_RETRIEVAL_JSONL = "/home/shebd/4_Collaboration/FYP2526/data/openi_retrieval.jsonl"
 
 def setup_logging(verbose: bool = False):
     """Setup logging configuration."""
@@ -52,9 +50,50 @@ def check_images_root_exists(images_root: str) -> bool:
     logging.info(f"Images root directory exists: {images_root}")
     return True
 
-def load_and_analyze_metadata(jsonl_path: str) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+def validate_retrieval_format(record: Dict[str, Any], line_num: int) -> List[str]:
     """
-    Load JSONL metadata and analyze its structure.
+    Validate that a record matches the expected retrieval format.
+    
+    Returns:
+        List of validation errors (empty if valid)
+    """
+    errors = []
+    
+    # Check required keys
+    required_keys = {'text', 'image', 'task'}
+    missing_keys = required_keys - set(record.keys())
+    if missing_keys:
+        errors.append(f"Missing required keys: {missing_keys}")
+    
+    # Check for extra keys
+    extra_keys = set(record.keys()) - required_keys
+    if extra_keys:
+        errors.append(f"Unexpected extra keys: {extra_keys}")
+    
+    # Validate 'task' field
+    if 'task' in record:
+        if record['task'] != 'retrieval':
+            errors.append(f"Task field should be 'retrieval', got: {record['task']}")
+    
+    # Validate 'text' field
+    if 'text' in record:
+        if not isinstance(record['text'], str):
+            errors.append(f"Text field should be string, got: {type(record['text']).__name__}")
+        elif len(record['text'].strip()) == 0:
+            errors.append("Text field is empty or only whitespace")
+    
+    # Validate 'image' field
+    if 'image' in record:
+        if not isinstance(record['image'], str):
+            errors.append(f"Image field should be string, got: {type(record['image']).__name__}")
+        elif len(record['image'].strip()) == 0:
+            errors.append("Image field is empty or only whitespace")
+    
+    return errors
+
+def load_and_analyze_retrieval_metadata(jsonl_path: str) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Load retrieval JSONL metadata and analyze its structure.
     
     Returns:
         tuple: (list of records, analysis dictionary)
@@ -64,13 +103,11 @@ def load_and_analyze_metadata(jsonl_path: str) -> tuple[List[Dict[str, Any]], Di
         return [], {}
     
     records = []
-    all_keys = Counter()
-    key_examples = defaultdict(set)
-    key_types = defaultdict(Counter)
-    empty_counts = defaultdict(int)
+    format_errors = []
     text_lengths = []
+    task_values = Counter()
     
-    logging.info(f"Loading and analyzing metadata from {jsonl_path}")
+    logging.info(f"Loading and analyzing retrieval metadata from {jsonl_path}")
     
     try:
         with open(jsonl_path, 'r', encoding='utf-8') as f:
@@ -83,30 +120,29 @@ def load_and_analyze_metadata(jsonl_path: str) -> tuple[List[Dict[str, Any]], Di
                     record = json.loads(line)
                     records.append(record)
                     
-                    # Analyze keys
-                    for key, value in record.items():
-                        all_keys[key] += 1
-                        
-                        # Store examples (limit to avoid memory issues)
-                        if len(key_examples[key]) < 5:
-                            if isinstance(value, str) and len(value) < 100:
-                                key_examples[key].add(value)
-                            elif not isinstance(value, str):
-                                key_examples[key].add(str(value)[:100])
-                        
-                        # Track types
-                        key_types[key][type(value).__name__] += 1
-                        
-                        # Check for empty values
-                        if value is None or value == "" or (isinstance(value, str) and value.strip() == ""):
-                            empty_counts[key] += 1
-                        
-                        # Track text lengths if it's a text field
-                        if key in ['text', 'caption', 'title'] and isinstance(value, str):
-                            text_lengths.append(len(value))
+                    # Validate retrieval format
+                    errors = validate_retrieval_format(record, line_num)
+                    if errors:
+                        format_errors.append({
+                            'line_num': line_num,
+                            'errors': errors,
+                            'record': record
+                        })
+                    
+                    # Collect statistics
+                    if 'text' in record and isinstance(record['text'], str):
+                        text_lengths.append(len(record['text']))
+                    
+                    if 'task' in record:
+                        task_values[record['task']] += 1
                 
                 except json.JSONDecodeError as e:
                     logging.warning(f"Failed to parse JSON at line {line_num}: {e}")
+                    format_errors.append({
+                        'line_num': line_num,
+                        'errors': [f"JSON decode error: {e}"],
+                        'record': None
+                    })
                     continue
                 
                 # Progress logging for large files
@@ -120,10 +156,10 @@ def load_and_analyze_metadata(jsonl_path: str) -> tuple[List[Dict[str, Any]], Di
     # Compile analysis
     analysis = {
         'total_records': len(records),
-        'all_keys': dict(all_keys),
-        'key_examples': {k: list(v) for k, v in key_examples.items()},
-        'key_types': {k: dict(v) for k, v in key_types.items()},
-        'empty_counts': dict(empty_counts),
+        'format_errors': format_errors,
+        'format_error_count': len(format_errors),
+        'valid_records': len(records) - len([e for e in format_errors if e['record'] is not None]),
+        'task_value_distribution': dict(task_values),
         'text_length_stats': {
             'count': len(text_lengths),
             'min': min(text_lengths) if text_lengths else 0,
@@ -216,30 +252,30 @@ def check_image_metadata_matching(records: List[Dict], images_root: str) -> Dict
     
     return matching_stats
 
-def print_analysis_report(analysis: Dict[str, Any], matching_stats: Dict[str, Any]):
+def print_analysis_report(analysis: Dict[str, Any], matching_stats: Dict[str, Any], jsonl_path: str):
     """Print a comprehensive analysis report."""
     print("\n" + "="*80)
-    print("OPENI DATASET VALIDATION REPORT")
+    print("RETRIEVAL DATASET VALIDATION REPORT")
     print("="*80)
     
     print(f"\n📊 DATASET OVERVIEW")
     print(f"Images root directory: {IMAGES_ROOT}")
-    print(f"Metadata file: {METADATA_JSONL}")
+    print(f"Retrieval JSONL file: {jsonl_path}")
     print(f"Total metadata records: {analysis['total_records']:,}")
     
-    print(f"\n🔑 METADATA STRUCTURE ANALYSIS")
-    print(f"Total unique keys found: {len(analysis['all_keys'])}")
-    print("\nKey frequency and types:")
-    for key, count in sorted(analysis['all_keys'].items()):
-        types_info = analysis['key_types'].get(key, {})
-        empty_count = analysis['empty_counts'].get(key, 0)
-        empty_pct = (empty_count / analysis['total_records']) * 100
-        
-        print(f"  {key:20} | Count: {count:8,} | Types: {types_info} | Empty: {empty_count:6,} ({empty_pct:.1f}%)")
+    print(f"\n✅ FORMAT VALIDATION")
+    print(f"Valid retrieval format records: {analysis['valid_records']:,}")
+    print(f"Format errors found: {analysis['format_error_count']:,}")
     
-    print(f"\n📝 KEY EXAMPLES (first few values for each key):")
-    for key, examples in analysis['key_examples'].items():
-        print(f"  {key:20} | Examples: {examples}")
+    if analysis['format_errors']:
+        print(f"\n⚠️  FORMAT ERRORS (first 5):")
+        for error_info in analysis['format_errors'][:5]:
+            print(f"  Line {error_info['line_num']}: {error_info['errors']}")
+    
+    print(f"\n📋 TASK FIELD DISTRIBUTION")
+    for task_value, count in analysis['task_value_distribution'].items():
+        percentage = (count / analysis['total_records']) * 100
+        print(f"  '{task_value}': {count:,} ({percentage:.1f}%)")
     
     if analysis['text_length_stats']:
         stats = analysis['text_length_stats']
@@ -285,13 +321,14 @@ def print_analysis_report(analysis: Dict[str, Any], matching_stats: Dict[str, An
     print("\n" + "="*80)
 
 def main():
-    parser = argparse.ArgumentParser(description="Validate OpenI dataset structure and image file existence")
+    parser = argparse.ArgumentParser(description="Validate retrieval-format JSONL dataset structure and image file existence")
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--jsonl", type=str, default=DEFAULT_RETRIEVAL_JSONL, help="Path to retrieval JSONL file")
     args = parser.parse_args()
     
     setup_logging(args.verbose)
     
-    print("Starting OpenI dataset validation...")
+    print("Starting retrieval dataset validation...")
     
     # Step 1: Check images root directory exists
     logging.info("Step 1: Checking images root directory...")
@@ -300,8 +337,8 @@ def main():
         return
     
     # Step 2: Load and analyze metadata
-    logging.info("Step 2: Loading and analyzing metadata...")
-    records, analysis = load_and_analyze_metadata(METADATA_JSONL)
+    logging.info("Step 2: Loading and analyzing retrieval metadata...")
+    records, analysis = load_and_analyze_retrieval_metadata(args.jsonl)
     
     if not records:
         logging.error("No records loaded from metadata file. Exiting.")
@@ -312,9 +349,9 @@ def main():
     matching_stats = check_image_metadata_matching(records, IMAGES_ROOT)
     
     # Step 4: Print comprehensive report
-    print_analysis_report(analysis, matching_stats)
+    print_analysis_report(analysis, matching_stats, args.jsonl)
     
-    print("\n✅ Dataset validation completed!")
+    print("\n✅ Retrieval dataset validation completed!")
 
 if __name__ == "__main__":
     main()
