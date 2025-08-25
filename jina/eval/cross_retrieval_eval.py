@@ -116,13 +116,14 @@ def _adapter_fingerprint(adapter_dir: str) -> str:
     return "<missing-adapter-file>"
 
 
-def load_eval_data(jsonl_path: str) -> Tuple[List[str], List[str], Dict[int, set], List[int]]:
+def load_eval_data(jsonl_path: str, image_base_dir: str = None) -> Tuple[List[str], List[str], Dict[int, set], List[int]]:
     """
     Load evaluation data from a JSONL file and organize it for cross-modal retrieval tasks.
     Each line in the input file should be a JSON object containing at least an image path
     (under the key "query_image" or "image") and a text (under the key "positive" or "text").
     Args:
         jsonl_path (str): Path to the JSONL file containing evaluation data.
+        image_base_dir (str, optional): Base directory for resolving relative image paths.
     Returns:
         Tuple containing:
             images (List[str]): List of unique image paths, where each index corresponds to an image ID.
@@ -145,10 +146,17 @@ def load_eval_data(jsonl_path: str) -> Tuple[List[str], List[str], Dict[int, set
             txt = item.get("positive") or item.get("text")
             if not img_path or not txt:
                 continue
-            if img_path not in img_index:
-                img_index[img_path] = len(images)
-                images.append(img_path)
-            i = img_index[img_path]
+            
+            # Resolve image path with base directory if provided
+            if image_base_dir and not os.path.isabs(img_path):
+                full_img_path = os.path.join(image_base_dir, img_path)
+            else:
+                full_img_path = img_path
+                
+            if full_img_path not in img_index:
+                img_index[full_img_path] = len(images)
+                images.append(full_img_path)
+            i = img_index[full_img_path]
             texts.append(txt)
             t = len(texts) - 1
             img_to_text_idxs[i].add(t)
@@ -246,7 +254,7 @@ def _gather_numpy_by_rank(local_array: np.ndarray) -> np.ndarray | None:
 
 
 @torch.inference_mode()
-def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batch_size: int, device: str) -> Dict[str, Dict[str, float]]:
+def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batch_size: int, device: str, image_base_dir: str = None) -> Dict[str, Dict[str, float]]:
     """
     Evaluates a cross-modal retrieval model on a given dataset and computes retrieval metrics.
     Args:
@@ -255,6 +263,7 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
         jsonl_path (str): Path to the evaluation data in JSONL format.
         batch_size (int): Batch size to use during evaluation.
         device (str): Device identifier (e.g., 'cpu', 'cuda', 'cuda:0') on which to run the evaluation.
+        image_base_dir (str, optional): Base directory for resolving relative image paths.
     Returns:
         Dict[str, Dict[str, float]]: A dictionary containing retrieval metrics for each direction (e.g., 'I2T', 'T2I').
             Each sub-dictionary contains metrics such as recall at various values of k (e.g., 'R@1', 'R@5', etc.).
@@ -354,7 +363,7 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
     finally:
         pass # No explicit cleanup needed for model, it's managed by torch.inference_mode
 
-    images, texts, img_to_text_idxs, text_to_img_idx = load_eval_data(jsonl_path)
+    images, texts, img_to_text_idxs, text_to_img_idx = load_eval_data(jsonl_path, image_base_dir)
     if len(images) == 0 or len(texts) == 0:
         raise ValueError("No valid images/texts found in dataset")
 
@@ -404,6 +413,7 @@ def main():
     parser.add_argument("--base_model_path", type=str, default=get_path("base_model_path"), help="Path to full base model (needed when --model_path only contains LoRA adapters)")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--image_base_dir", type=str, default=None, help="Base directory for resolving relative image paths")
     parser.add_argument("--save_dir", type=str, default=str(_project_root() / "outputs" / "eval"))
     args = parser.parse_args()
 
@@ -412,7 +422,7 @@ def main():
     if not os.path.isdir(args.model_path):
         raise FileNotFoundError(f"model_path directory not found: {args.model_path}")
 
-    results = evaluate(args.model_path, args.base_model_path, args.data_jsonl, args.batch_size, args.device)
+    results = evaluate(args.model_path, args.base_model_path, args.data_jsonl, args.batch_size, args.device, args.image_base_dir)
 
     # Only rank 0 prints/saves
     if _get_rank() == 0 and results:

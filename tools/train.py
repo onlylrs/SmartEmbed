@@ -132,6 +132,7 @@ def parse_args():
     # Data arguments (optional, override config)
     parser.add_argument("--train_data", type=str, help="Path to training data")
     parser.add_argument("--eval_data", type=str, help="Path to evaluation data")
+    parser.add_argument("--image_base_dir", type=str, help="Base directory for resolving relative image paths")
     parser.add_argument("--output_dir", type=str, help="Path to save training outputs")
     
     # Training arguments (optional, override config)
@@ -286,7 +287,7 @@ def main():
         "task_name": "retrieval",
         "shuffle": True,
         "num_workers": 0,
-        "image_base_dir": config.get('data', {}).get('image_base_dir', None), 
+        "image_base_dir": args.image_base_dir or config.get('data', {}).get('image_base_dir', None), 
     }
     
     # Set random seed

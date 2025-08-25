@@ -9,6 +9,7 @@ NUM_PROC=""               # optional override; if empty, derived from number of 
 DATA_JSONL="/project/fyp25_hc2/data/eval0.jsonl"
 MODEL_PATH="/project/fyp25_hc2/jina-embeddings-v4"
 BASE_MODEL_PATH="/project/fyp25_hc2/jina-embeddings-v4"
+IMAGE_BASE_DIR="/project/fyp25_hc2/data/Images"
 BATCH_SIZE=4
 DEVICE="cuda"
 
@@ -25,11 +26,12 @@ echo "Repo:        ${REPO_ROOT}"
 echo "Entry:       ${ENTRYPOINT}"
 echo "Run mode:    ${RUN_MODE}"
 echo "GPUs:        ${GPUS} (nproc=${NUM_PROC})"
-echo "Data JSONL:  ${DATA_JSONL}"
-echo "Model path:  ${MODEL_PATH}"
-echo "Base model:  ${BASE_MODEL_PATH}"
-echo "Batch size:  ${BATCH_SIZE}"
-echo "Device:      ${DEVICE}"
+echo "Data JSONL:    ${DATA_JSONL}"
+echo "Model path:    ${MODEL_PATH}"
+echo "Base model:    ${BASE_MODEL_PATH}"
+echo "Image base:    ${IMAGE_BASE_DIR}"
+echo "Batch size:    ${BATCH_SIZE}"
+echo "Device:        ${DEVICE}"
 
 if [[ "${RUN_MODE}" == "single" ]]; then
   # Use the first GPU id if device is cuda
@@ -40,6 +42,7 @@ if [[ "${RUN_MODE}" == "single" ]]; then
     --data_jsonl "${DATA_JSONL}" \
     --model_path "${MODEL_PATH}" \
     --base_model_path "${BASE_MODEL_PATH}" \
+    --image_base_dir "${IMAGE_BASE_DIR}" \
     --batch_size "${BATCH_SIZE}" \
     --device "${DEVICE}"
 else
@@ -49,6 +52,7 @@ else
     --data_jsonl "${DATA_JSONL}" \
     --model_path "${MODEL_PATH}" \
     --base_model_path "${BASE_MODEL_PATH}" \
+    --image_base_dir "${IMAGE_BASE_DIR}" \
     --batch_size "${BATCH_SIZE}" \
     --device "${DEVICE}"
 fi
