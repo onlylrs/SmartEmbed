@@ -1,10 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=jina_train
-#SBATCH --partition=normal               # 或 preempt（免费但可被中断）
+#SBATCH --partition=preempt               # 或 preempt（免费但可被中断）
 #SBATCH --nodes=1                        # 单机多卡，只需 1 个节点
 #SBATCH --ntasks-per-node=1              # 只启动一个任务（torchrun 会管理多进程）
 #SBATCH --gres=gpu:8                     # 请求 8 个 GPU（DGX 节点有 8 个）
-#SBATCH --time=infinite                  # normal 分区支持无限时长
+#SBATCH --time=2:00:00                  # normal 分区支持无限时长
+#SBATCH --account=medimgfmod
+#SBATCH --cpus-per-task=14 
 #SBATCH --output=%x-%j.out               # 输出日志文件名
 #SBATCH --error=%x-%j.err
 

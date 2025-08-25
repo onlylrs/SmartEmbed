@@ -10,9 +10,9 @@ data:
 # 训练配置
 training:
   output_dir: "/home/shebd/4_Collaboration/FYP2526/output/models"
-  batch_size: 3
+  batch_size: 16
   learning_rate: 1e-4
-  epochs: 30
+  epochs: 20
   use_lora: true
   # Optional: loss controls
   # temperature is tau; lower -> sharper. This initializes a learnable parameter (logit_scale)
