@@ -40,7 +40,7 @@ class MultimodalDataset(Dataset):
         text_max_length: int = 128,
         image_max_patches: int = 256,
         task_name: str = "retrieval",
-        image_base_dir: Optional[str] = "data/Images"
+        image_base_dir: Optional[str] = ""
     ):
         """
         Initialize the dataset.
@@ -386,6 +386,7 @@ def get_training_dataloader(
             - task_name: Task name (default: "retrieval")
             - shuffle: Whether to shuffle (default: True)
             - num_workers: Number of workers (default: 0)
+            - image_base_dir: Base directory for relative image paths (default: None)
         model_path: Path to Jina model
         
     Returns:

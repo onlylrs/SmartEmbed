@@ -21,9 +21,9 @@ SCRIPT_DIR="/project/fyp25_hc2/scripts"    # 你的脚本所在路径
 REPO_ROOT="/home/shebd/4_Collaboration/FYP2526"
 ENTRYPOINT="${REPO_ROOT}/tools/train.py"
 
-TRAIN_DATA="/project/medimgfmod/Generalist/shebd/openi_data_generation_parsed_copy.jsonl" # 改
-EVAL_DATA="" # 改
-OUTPUT_DIR="/project/fyp25_hc2/results/jina_test_run_liam1" # 改
+TRAIN_DATA="/project/medimgfmod/Generalist/shebd/openi_data_generation_parsed_copy.jsonl"
+EVAL_DATA=""
+OUTPUT_DIR="/home/shebd/4_Collaboration/FYP2526/output/models/run_0"
 
 # === 启动训练 ===
 cd "$REPO_ROOT"

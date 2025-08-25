@@ -5,11 +5,11 @@ base_model_path: "/project/fyp25_hc2/jina-embeddings-v4"
 
 # 数据配置 
 data:
-  image_base_dir: "data/Images"
+  image_base_dir: "/scratch/medimgfmod/Generalist/medical"
 
 # 训练配置
 training:
-  output_dir: "outputs/models"
+  output_dir: "/home/shebd/4_Collaboration/FYP2526/output/models"
   batch_size: 3
   learning_rate: 1e-4
   epochs: 30
