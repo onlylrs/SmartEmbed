@@ -3,13 +3,13 @@ set -euo pipefail
 
 # User-configurable settings
 RUN_MODE="distributed"   # "single" or "distributed"
-GPUS="0,1,2,3,4,5,6,7"            # e.g., "0" or "0,1,2,3"; for single, first id is used
+GPUS="0,1"            # e.g., "0" or "0,1,2,3"; for single, first id is used
 NUM_PROC=""               # optional override; if empty, derived from number of GPUS
 
 # Optional override paths (usually set in project_config.yaml)
-TRAIN_DATA="/project/fyp25_hc2/data/train0.jsonl"             # leave empty to use default from tools/train.py
+TRAIN_DATA="/home/shebd/4_Collaboration/FYP2526/data/train_full_path.jsonl"             # leave empty to use default from tools/train.py
 EVAL_DATA=""              # optional
-OUTPUT_DIR="/project/fyp25_hc2/results/jina_test_run_liam1"             # Optional: Override for the training output directory. If empty, uses default from config.
+OUTPUT_DIR="/home/shebd/4_Collaboration/FYP2526/output/models/run_2"             # Optional: Override for the training output directory. If empty, uses default from config.
 
 # Script paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,7 +44,7 @@ if [[ "${RUN_MODE}" == "single" ]]; then
   python -u "${ENTRYPOINT}" "${COMMON_ARGS[@]}"
 else
   export CUDA_VISIBLE_DEVICES="${GPUS}"
-  torchrun --standalone --nproc-per-node="${NUM_PROC}" "${ENTRYPOINT}" "${COMMON_ARGS[@]}"
+  python -m torch.distributed.run --standalone --nproc-per-node="${NUM_PROC}" "${ENTRYPOINT}" "${COMMON_ARGS[@]}"
 fi
 
 

@@ -102,8 +102,8 @@ def create_training_config(project_config, args):
     
     # Create and return JinaTrainingConfig with project_config values
     training_config = JinaTrainingConfig(
-        # Model settings (from project_config)
-        model_name_or_path=project_config['base_model_path'],
+        # Model settings (use get_path for consistency with local_paths.yaml)
+        # model_name_or_path will use default which calls get_path("base_model_path")
         trust_remote_code=True,
         
         # Training hyperparameters (from project_config + args override)

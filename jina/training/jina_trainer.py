@@ -509,84 +509,58 @@ def setup_model_for_training(
         # later by matching visual.* linears and applying the same MultiAdapterLinear
         # mechanism.
 
-        # If the model already has PEFT, activate an existing adapter (prefer 'retrieval' or 'default')
-        if hasattr(model, 'peft_config'):
-            available_adapters = list(getattr(model, 'peft_config', {}).keys())
-            chosen = None
-            for cand in (adapter_name, 'retrieval', 'default'):
-                if cand in available_adapters:
-                    chosen = cand
-                    break
-            if chosen is None and available_adapters:
-                chosen = available_adapters[0]
+        # If the model already has PEFT, it was likely loaded by JinaEmbeddingsV4Model.from_pretrained,
+        # which does not apply the custom MultiAdapterLinear module. We need to unwrap it and re-apply
+        # PEFT with the correct configuration.
+        if hasattr(model, 'peft_config') and hasattr(model, 'model'):
+            model = model.model  # Unwrap the base model from PeftModel
 
-            if chosen is not None:
-                try:
-                    model.set_adapter(chosen)
-                    logger.info(f"Activated PEFT adapter '{chosen}'")
-                except Exception:
-                    pass
-
-            # Make sure adapters are train-mode and not in inference-only
-            for cfg_name, cfg in getattr(model, 'peft_config', {}).items():
+        # Now, apply PEFT with the custom MultiAdapterLinear module
+        if use_lora:
+            if task_names is None:
+                task_names = ["retrieval", "text-matching", "code"]
+            # target_regex = r"(.*(model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(single_vector_projector|multi_vector_projector).*$)"
+            target_regex = r".*(model\.layers\.\d+\.mlp\.(down_proj|gate_proj|up_proj)|model\.layers\.\d+\.self_attn\.(k_proj|q_proj|v_proj|o_proj)).*$|.*(single_vector_projector|multi_vector_projector).*$"
+            lora_config = LoraConfig(
+                task_type=TaskType.FEATURE_EXTRACTION,
+                r=lora_r,
+                lora_alpha=lora_alpha,
+                lora_dropout=lora_dropout,
+                target_modules=target_regex,
+                modules_to_save=None,
+                inference_mode=False,
+            )
+            from torch.nn.modules.linear import Linear
+            from functools import partial
+            lora_config._custom_modules = {  # type: ignore[attr-defined]
+                Linear: partial(MultiAdapterLinear, task_names=task_names)
+            }
+            model = get_peft_model(model, lora_config)
+            try:
+                model.set_adapter(adapter_name)
+            except Exception:
+                pass
+            for cfg in getattr(model, 'peft_config', {}).values():
                 if hasattr(cfg, 'inference_mode'):
                     cfg.inference_mode = False
-
-            # Enable gradients for LoRA and projector
-            enabled = 0
             for name, param in model.named_parameters():
-                if ('lora_' in name) or ('multi_vector_projector' in name):
-                    if not param.requires_grad:
-                        param.requires_grad = True
-                    enabled += 1
-            logger.info(f"Enabled gradients for {enabled} LoRA/projector parameters")
-
-            model.train()
-            return model
-
-        if task_names is None:
-            task_names = ["retrieval", "text-matching", "code"]
-        target_regex = r"(.*(model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(single_vector_projector|multi_vector_projector).*$)"
-        lora_config = LoraConfig(
-            task_type=TaskType.FEATURE_EXTRACTION,
-            r=lora_r,
-            lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            target_modules=target_regex,
-            modules_to_save=None,
-            inference_mode=False,
-        )
-        from torch.nn.modules.linear import Linear
-        from functools import partial
-        lora_config._custom_modules = {  # type: ignore[attr-defined]
-            Linear: partial(MultiAdapterLinear, task_names=task_names)
-        }
-        model = get_peft_model(model, lora_config)
-        try:
-            model.set_adapter(adapter_name)
-        except Exception:
-            pass
-        for cfg in getattr(model, 'peft_config', {}).values():
-            if hasattr(cfg, 'inference_mode'):
-                cfg.inference_mode = False
-        for name, param in model.named_parameters():
-            if ('lora_' in name) or ('multi_vector_projector' in name) or ('single_vector_projector' in name):
-                param.requires_grad = True
-        # Make sure all LoRA layers are in unmerged (training) state
-        from peft.tuners.lora import LoraLayer as _LL
-        for mod in model.modules():
-            if isinstance(mod, _LL) and getattr(mod, 'merged', False):
-                try:
-                    mod.unmerge()
-                except Exception:
-                    pass
-            if isinstance(mod, _LL):
-                try:
-                    mod.disable_adapters = False
-                except AttributeError:
-                    logger.warning(f"Could not set disable_adapters=False on {type(mod).__name__}, assuming it's active.")
-                    pass
-        logger.info("LoRA adapters added per official adapter_config targeting; decoder LoRA active and projector trainable")
+                if ('lora_' in name) or ('multi_vector_projector' in name) or ('single_vector_projector' in name):
+                    param.requires_grad = True
+            # Make sure all LoRA layers are in unmerged (training) state
+            from peft.tuners.lora import LoraLayer as _LL
+            for mod in model.modules():
+                if isinstance(mod, _LL) and getattr(mod, 'merged', False):
+                    try:
+                        mod.unmerge()
+                    except Exception:
+                        pass
+                if isinstance(mod, _LL):
+                    try:
+                        mod.disable_adapters = False
+                    except AttributeError:
+                        logger.warning(f"Could not set disable_adapters=False on {type(mod).__name__}, assuming it's active.")
+                        pass
+            logger.info("LoRA adapters added per official adapter_config targeting; decoder LoRA active and projector trainable")
     
     return model
 
