@@ -519,8 +519,8 @@ def setup_model_for_training(
         if use_lora:
             if task_names is None:
                 task_names = ["retrieval", "text-matching", "code"]
-            # target_regex = r"(.*(model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(single_vector_projector|multi_vector_projector).*$)"
-            target_regex = r".*(model\.layers\.\d+\.mlp\.(down_proj|gate_proj|up_proj)|model\.layers\.\d+\.self_attn\.(k_proj|q_proj|v_proj|o_proj)).*$|.*(single_vector_projector|multi_vector_projector).*$"
+            target_regex = r"(.*(model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(single_vector_projector|multi_vector_projector).*$)"
+            # target_regex = r".*(model\.layers\.\d+\.mlp\.(down_proj|gate_proj|up_proj)|model\.layers\.\d+\.self_attn\.(k_proj|q_proj|v_proj|o_proj)).*$|.*(single_vector_projector|multi_vector_projector).*$"
             lora_config = LoraConfig(
                 task_type=TaskType.FEATURE_EXTRACTION,
                 r=lora_r,

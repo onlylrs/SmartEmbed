@@ -22,6 +22,8 @@ import os
 from datetime import datetime
 import wandb
 
+from transformers import AutoModel
+
 # Import our modules
 from jina.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
 from jina.models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
@@ -204,20 +206,25 @@ def main():
         train_dataset = train_dataloader.dataset
         
         # Load model (processor is already inside Dataset)
-        logger.info("Loading model...")
-        model = JinaEmbeddingsV4Model.from_pretrained(str(base_model_path))
+        # import pdb; pdb.set_trace()
+        base_model_path = "/project/medimgfmod/Generalist/0_Pretrained/jina-embeddings-v4"
+        # logger.info(f"Loading model... {str(base_model_path)}")
         
+        # model = AutoModel.from_pretrained("jinaai/jina-embeddings-v4", trust_remote_code=True, torch_dtype=torch.float16)
+        # model = AutoModel.from_pretrained(str(base_model_path), trust_remote_code=True)
+        model = JinaEmbeddingsV4Model.from_pretrained(str(base_model_path))
+        # import pdb; pdb.set_trace()
         # Setup model for training
-        if training_config.use_lora:
-            model = setup_model_for_training(
-                model,
-                use_lora=True,
-                lora_r=training_config.lora_r,
-                lora_alpha=training_config.lora_alpha,
-                lora_dropout=training_config.lora_dropout,
-                enable_visual_lora=getattr(training_config, 'enable_visual_lora', False)
-                # enable 这个待定，目前是config里为false
-            )
+        # if training_config.use_lora:
+        #     model = setup_model_for_training(
+        #         model,
+        #         use_lora=True,
+        #         lora_r=training_config.lora_r,
+        #         lora_alpha=training_config.lora_alpha,
+        #         lora_dropout=training_config.lora_dropout,
+        #         enable_visual_lora=getattr(training_config, 'enable_visual_lora', False)
+        #         # enable 这个待定，目前是config里为false
+        #     )
         
         # Force model into training mode
         # train() is defined in pytorch

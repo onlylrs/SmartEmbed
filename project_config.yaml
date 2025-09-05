@@ -1,7 +1,7 @@
 # Jina Embeddings V4 Research Project Configuration
 
 # 基础模型路径（包含预训练的Jina模型）
-base_model_path: "/home/shebd/4_Collaboration/FYP2526/jina-embeddings-v4"
+base_model_path: "/project/medimgfmod/Generalist/0_Pretrained/jina-embeddings-v4"
 
 # 数据配置 
 data:

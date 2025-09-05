@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # User-configurable settings
-RUN_MODE="distributed"   # "single" or "distributed"
-GPUS="0,1"            # e.g., "0" or "0,1,2,3"; for single, first id is used
+RUN_MODE="single"   # "single" or "distributed"
+GPUS="1"            # e.g., "0" or "0,1,2,3"; for single, first id is used
 NUM_PROC=""               # optional override; if empty, derived from number of GPUS
 
 # Optional override paths (usually set in project_config.yaml)

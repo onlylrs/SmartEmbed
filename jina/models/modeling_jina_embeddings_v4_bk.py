@@ -1,3 +1,5 @@
+# This file is from the base model - Jina Embeddings V4 main model implementation
+# Core model classes: JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
 # Jina Embeddings V4 Model implementation was inspired by the ColPali codebase:
 # https://github.com/illuin-tech/colpali
 
@@ -20,9 +22,10 @@ from tqdm import tqdm
 from transformers import BatchFeature
 from transformers.utils import is_flash_attn_2_available
 
-from .configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
-from .custom_lora_module import MultiAdapterLinear
-from .qwen2_5_vl import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
+# 修改为绝对导入，避免相对导入问题
+from jina.models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
+from jina.models.custom_lora_module import MultiAdapterLinear
+from jina.models.qwen2_5_vl import Qwen2_5_VLForConditionalGeneration, Qwen2_5_VLProcessor
 
 
 class PromptType(str, Enum):
@@ -418,7 +421,7 @@ class JinaEmbeddingsV4Model(Qwen2_5_VLForConditionalGeneration):
         texts: Union[str, List[str]],
         task: Optional[str] = None,
         max_length: int = 32768,
-        batch_size: int = 8,
+        batch_size: Optional[int] = None,
         return_multivector: bool = False,
         return_numpy: bool = False,
         truncate_dim: Optional[int] = None,
@@ -465,6 +468,8 @@ class JinaEmbeddingsV4Model(Qwen2_5_VLForConditionalGeneration):
         if isinstance(texts, str):
             texts = [texts]
 
+        batch_size = batch_size or self.config.per_device_eval_batch_size
+
         embeddings = self._process_batches(
             data=texts,
             processor_fn=processor_fn,
@@ -496,7 +501,7 @@ class JinaEmbeddingsV4Model(Qwen2_5_VLForConditionalGeneration):
         self,
         images: Union[str, Image.Image, List[Union[str, Image.Image]]],
         task: Optional[str] = None,
-        batch_size: int = 8,
+        batch_size: Optional[int] = None,
         return_multivector: bool = False,
         return_numpy: bool = False,
         truncate_dim: Optional[int] = None,
@@ -539,6 +544,9 @@ class JinaEmbeddingsV4Model(Qwen2_5_VLForConditionalGeneration):
             images = [images]
 
         images = self._load_images_if_needed(images)
+        
+        batch_size = batch_size or self.config.per_device_eval_batch_size
+        
         embeddings = self._process_batches(
             data=images,
             processor_fn=self.processor.process_images,
@@ -592,7 +600,6 @@ class JinaEmbeddingsV4Model(Qwen2_5_VLForConditionalGeneration):
                 task_names=base_model.config.task_names,
             )
         }
-        # import pdb; pdb.set_trace()
         peft_model = PeftModel.from_pretrained(
             model=base_model,
             model_id=adapter_dir,

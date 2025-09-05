@@ -355,17 +355,17 @@ def load_processor_and_freeze(model_path: str) -> JinaEmbeddingsV4Processor:
     """
     # Load processor and model
     processor = JinaEmbeddingsV4Processor.from_pretrained(model_path, trust_remote_code=True)
-    model = JinaEmbeddingsV4Model.from_pretrained(model_path, trust_remote_code=True)
+    # model = JinaEmbeddingsV4Model.from_pretrained(model_path, trust_remote_code=True)
     
-    # Freeze all parameters
-    for param in model.parameters():
-        param.requires_grad_(False)
+    # # Freeze all parameters
+    # for param in model.parameters():
+    #     param.requires_grad_(False)
     
-    # Verify all parameters are frozen
-    for name, param in model.named_parameters():
-        assert not param.requires_grad, f"Parameter {name} still has requires_grad=True"
+    # # Verify all parameters are frozen
+    # for name, param in model.named_parameters():
+    #     assert not param.requires_grad, f"Parameter {name} still has requires_grad=True"
     
-    logger.info("Loaded and froze Jina processor and model")
+    # logger.info("Loaded and froze Jina processor and model")
     return processor
 
 

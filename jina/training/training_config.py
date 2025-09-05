@@ -13,7 +13,7 @@ class JinaTrainingConfig:
     """Configuration for Jina Embeddings V4 training"""
     
     # Model settings
-    model_name_or_path: str = get_path("base_model_path") or "./jina-embeddings-v4-base"
+    model_name_or_path: str = "/project/medimgfmod/Generalist/shebd/FYP2526/jina-embeddings-v4"
     config_name: Optional[str] = None
     tokenizer_name: Optional[str] = None
     cache_dir: Optional[str] = None
