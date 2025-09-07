@@ -1,19 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# User-configurable settings
-RUN_MODE="distributed"   # "single" or "distributed"
-GPUS="0,1"            # e.g., "0" or "0,1,2,3"; for single, first id is used
-NUM_PROC=""               # optional override; if empty, derived from number of GPUS
-
-# Optional override paths (usually set in project_config.yaml)
-TRAIN_DATA="/home/shebd/4_Collaboration/FYP2526/data/train_full_path.jsonl"             # leave empty to use default from tools/train.py
-EVAL_DATA=""              # optional
-OUTPUT_DIR="/home/shebd/4_Collaboration/FYP2526/output/models/run_9.7"             # Optional: Override for the training output directory. If empty, uses default from config.
-
-# Script paths
+# Load runtime configuration from unified config system
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"  # expected to be SmartEmbed
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Load default runtime configuration
+eval $(python "${SCRIPT_DIR}/get_config.py" --section runtime)
+
+# User-configurable settings (override defaults if needed)
+RUN_MODE="${RUN_MODE:-$DEFAULT_RUN_MODE}"   # "single" or "distributed"
+GPUS="${GPUS:-$DEFAULT_GPUS}"               # e.g., "0" or "0,1,2,3"
+NUM_PROC="${NUM_PROC:-}"                    # optional override; if empty, derived from GPUS
+
+# Load data configuration
+eval $(python "${SCRIPT_DIR}/get_config.py" --section data)
+
+# Data paths are now loaded from config as TRAIN_DATA, EVAL_DATA etc.
+# They can still be overridden by environment variables if needed
+
+# Load training configuration for output directory  
+eval $(python "${SCRIPT_DIR}/get_config.py" --section training)
+
+# OUTPUT_DIR is now loaded from config
+# It can still be overridden by environment variables if needed
+
 ENTRYPOINT="${REPO_ROOT}/tools/train.py"
 
 IFS=',' read -r -a GPU_ARR <<< "${GPUS}"

@@ -1,26 +1,33 @@
 """
-Training configuration for Jina Embeddings V4 training
+Configuration schema for Jina Embeddings V4 training.
+
+This file contains the data structure definitions for training configurations.
+All default values are managed through the unified configuration system:
+- system_config.yaml (system defaults)
+- user_config.yaml (user overrides)
+
+Use jina.utils.config_manager.create_training_config_from_unified() to create instances.
 """
 
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any
 import torch
-from jina.utils.local_paths import get_path  # new utility
 
 
 @dataclass
 class JinaTrainingConfig:
-    """Configuration for Jina Embeddings V4 training"""
+    """Configuration schema for Jina Embeddings V4 training.
+    
+    This class defines the structure of training configuration parameters.
+    Default values are now managed by the unified configuration system.
+    Use config_manager.create_training_config_from_unified() to create instances.
+    """
     
     # Model settings
-    model_name_or_path: str = "/project/medimgfmod/Generalist/shebd/FYP2526/jina-embeddings-v4"
-    config_name: Optional[str] = None
-    tokenizer_name: Optional[str] = None
-    cache_dir: Optional[str] = None
-    model_revision: str = "main"
-    use_auth_token: bool = False
-    torch_dtype: Optional[str] = "auto"
-    trust_remote_code: bool = True
+    model_name_or_path: Optional[str] = None  # Model path or name (provided via config system)
+    model_revision: str = "main"              # Git branch/tag for model version control
+    torch_dtype: Optional[str] = "auto"       # Data type for model weights (auto/float16/bfloat16)
+    trust_remote_code: bool = True            # Required for Jina custom model architecture
     
     # Training hyperparameters
     output_dir: str = "./results"
@@ -36,10 +43,10 @@ class JinaTrainingConfig:
     save_total_limit: int = 2
     
     num_train_epochs: int = 3
-    per_device_train_batch_size: int = 1  # Further reduced for 3090 GPUs
-    per_device_eval_batch_size: int = 1   # Further reduced
-    gradient_accumulation_steps: int = 8  # Increased to maintain effective batch size
-    learning_rate: float = 5e-5
+    per_device_train_batch_size: int = 16
+    per_device_eval_batch_size: int = 8
+    gradient_accumulation_steps: int = 1
+    learning_rate: float = 1e-4
     weight_decay: float = 0.01
     adam_beta1: float = 0.9
     adam_beta2: float = 0.999
@@ -51,28 +58,25 @@ class JinaTrainingConfig:
     warmup_steps: int = 0
     
     # Data settings
-    max_seq_length: int = 128  # Further reduced from 256 to save memory
+    max_seq_length: int = 256
     preprocessing_num_workers: int = 1
     dataloader_num_workers: int = 0
     dataloader_pin_memory: bool = True
     
     # LoRA settings
     use_lora: bool = True
-    lora_r: int = 32
-    lora_alpha: int = 32
-    lora_dropout: float = 0.1
-    lora_target_modules: List[str] = field(default_factory=lambda: [
-        "(.*(model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(single_vector_projector|multi_vector_projector).*$)"
-    ])
-    lora_bias: str = "none"
-    task_names: List[str] = field(default_factory=lambda: ["retrieval", "text-matching", "code"])
-    enable_visual_lora: bool = False
+    lora_r: int = 16                                         # LoRA rank - controls adaptation capacity
+    lora_alpha: int = 16                                     # LoRA scaling factor
+    lora_dropout: float = 0.1                                # Dropout rate for LoRA layers
+    lora_bias: str = "none"                                  # LoRA bias configuration
+    task_names: List[str] = field(default_factory=lambda: ["retrieval", "text-matching", "code"])  # Task names for multi-adapter LoRA
+    enable_visual_lora: bool = False                         # Apply LoRA to visual components
     
     # Jina-specific settings
     single_vector_pool_strategy: str = "mean"
     multi_vector_projector_dim: int = 128
     matryoshka_dims: List[int] = field(default_factory=lambda: [128, 256, 512, 1024, 2048])
-    use_matryoshka: bool = False  # Add matryoshka loss support
+    use_matryoshka: bool = False
     
     # Loss function settings
     temperature: float = 0.02
@@ -80,11 +84,10 @@ class JinaTrainingConfig:
     use_miner: bool = False
     miner_margin: float = 0.2
     type_of_triplets: str = "all"
-    # Whether to use the simplified contrastive loss (I->T only). If False, use symmetric (I<->T averaged)
     use_simplified_contrastive: bool = True
     
     # Contrastive learning settings
-    negative_sampling_strategy: str = "random"  # "random" or "hard"
+    negative_sampling_strategy: str = "random"
     num_negatives: int = 7
     
     # Evaluation settings
@@ -96,15 +99,15 @@ class JinaTrainingConfig:
     data_seed: int = None
     local_rank: int = -1
     use_cpu: bool = False
-    fp16: bool = True   # Use fp16 for 3090 GPU compatibility
-    bf16: bool = False  # 3090 doesn't support bf16
+    fp16: bool = False
+    bf16: bool = True
     tf32: bool = True
     
     # GPU Memory optimization
     dataloader_drop_last: bool = True
     ddp_find_unused_parameters: bool = True
-    gradient_checkpointing: bool = True  # Enable gradient checkpointing to save memory
-    max_memory_MB: int = 20000  # Limit memory usage per GPU (adjust for 3090s)
+    gradient_checkpointing: bool = True
+    max_memory_MB: int = 20000
     
     # Logging and monitoring
     report_to: List[str] = field(default_factory=lambda: [])

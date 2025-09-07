@@ -5,7 +5,7 @@
 #SBATCH --account=medimgfmod
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=28
 #SBATCH --time=96:00:00
 #SBATCH --output=%x-%j.out
@@ -20,8 +20,8 @@ set -euo pipefail
 source ~/.bashrc
 source activate FYP2526_JINA
 
-# Change to the project directory
-cd /home/shebd/4_Collaboration/FYP2526/SmartEmbed_liam
+# Change to the project directory (use current directory)
+cd /home/shebd/4_Collaboration/FYP2526/FYP2526_fred
 
 # Print environment info for debugging
 echo "========================================="
@@ -38,15 +38,28 @@ echo "Working directory: $(pwd)"
 echo "Conda environment: $CONDA_DEFAULT_ENV"
 echo "========================================="
 
-# User-configurable settings for training
-export RUN_MODE="distributed"   # Use distributed training for 4 GPUs
-export GPUS="0,1,2,3"          # Use all 4 GPUs
-export NUM_PROC="4"            # 4 processes for 4 GPUs
+# Load SLURM configuration from unified config system
+eval $(python tools/get_config.py --section runtime)
 
-# Optional override paths (usually set in project_config.yaml)
-export TRAIN_DATA="/home/shebd/4_Collaboration/FYP2526/data/train_full_path.jsonl"
-export EVAL_DATA=""              # optional
-export OUTPUT_DIR="/home/shebd/4_Collaboration/FYP2526/output/models/run_9.6"
+# SLURM-specific settings (override runtime defaults for cluster environment)
+export RUN_MODE="${SLURM_RUN_MODE:-$DEFAULT_RUN_MODE}"     # Use distributed training for multiple GPUs
+export GPUS="${SLURM_GPUS:-$DEFAULT_GPUS}"                # Use SLURM GPU allocation
+export NUM_PROC="${SLURM_NUM_PROC:-$SLURM_GPUS_ON_NODE}"  # Use SLURM GPU count
+
+# Load data and training configuration
+eval $(python tools/get_config.py --section data)
+eval $(python tools/get_config.py --section training)
+
+# Configuration is now loaded from unified system as:
+# TRAIN_DATA, EVAL_DATA, OUTPUT_DIR, etc.
+# These can still be overridden by environment variables for job customization
+
+echo "=== Configuration from unified system ==="
+echo "Run mode: $RUN_MODE"
+echo "GPUs: $GPUS"
+echo "Train data: $TRAIN_DATA"
+echo "Output dir: $OUTPUT_DIR"
+echo "========================================="
 
 ./tools/run_train.sh
 

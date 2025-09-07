@@ -25,7 +25,7 @@ from ..models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbe
 from ..models.custom_lora_module import MultiAdapterLinear
 from ..models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
 from ..models.losses import JinaContrastiveLoss, JinaMultiTaskLoss, JinaMatryoshkaLoss
-from ..training.training_config import JinaTrainingConfig
+from ..training.config_schema import JinaTrainingConfig
 from ..data.data_collator import JinaContrastiveDataCollator
 
 logger = logging.getLogger(__name__)
@@ -82,6 +82,10 @@ class JinaEmbeddingTrainer(Trainer):
             processing_class=tokenizer,  # Use processing_class instead of tokenizer
             **kwargs
         )
+        
+        # Set label_names after initialization to fix "No label_names provided" warning
+        # For retrieval tasks, we don't need traditional labels
+        self.label_names = []
     
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -457,7 +461,8 @@ class JinaEmbeddingTrainer(Trainer):
         # Save model (unwrap DDP/Accelerator wrappers if present)
         model_to_save = self.model.module if hasattr(self.model, 'module') else self.model
         if hasattr(model_to_save, 'save_pretrained'):
-            model_to_save.save_pretrained(output_dir)
+            # model_to_save.save_pretrained(output_dir)
+            model_to_save.save_pretrained(os.path.join(output_dir, "adapters"), save_embedding_layers=False)
         else:
             torch.save(model_to_save.state_dict(), os.path.join(output_dir, "pytorch_model.bin"))
             
@@ -578,7 +583,6 @@ def setup_model_for_training_legacy(
         training_config.model_name_or_path,
         torch_dtype=getattr(torch, training_config.torch_dtype) if training_config.torch_dtype != "auto" else "auto",
         trust_remote_code=training_config.trust_remote_code,
-        cache_dir=training_config.cache_dir,
     )
     
     if training_config.use_lora:

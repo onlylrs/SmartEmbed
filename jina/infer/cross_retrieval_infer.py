@@ -38,14 +38,20 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from jina.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model
-from jina.utils.local_paths import get_path
+from jina.utils.config_manager import load_config
 from peft import PeftModel
 
 
 def _default_model_path() -> str:
-    p = get_path("finetuned_model_path")
-    if p and os.path.isdir(p):
-        return p
+    """Get default model path from unified config system"""
+    config = load_config()
+    # Try to get from training output directory
+    output_dir = config.get('training', {}).get('output_dir', 'outputs/models')
+    candidate = _project_root() / output_dir / "finetuned"
+    if candidate.exists():
+        return str(candidate)
+    
+    # Fallback to default location
     candidate = _project_root() / "outputs" / "models" / "finetuned"
     return str(candidate)
 
@@ -277,7 +283,14 @@ def main():
     parser = argparse.ArgumentParser(description="Cross-modal inference: compute embeddings and optional top-k results")
     parser.add_argument("--data_jsonl", type=str, required=True, help="Path to JSONL inference data")
     parser.add_argument("--model_path", type=str, default=_default_model_path(), help="Path to finetuned model directory")
-    parser.add_argument("--base_model_path", type=str, default=get_path("base_model_path"), help="Path to full base model (needed when --model_path only contains LoRA adapters)")
+    def get_base_model_path():
+        try:
+            config = load_config()
+            return config.get('model', {}).get('base_model_path')
+        except Exception:
+            return None
+    
+    parser.add_argument("--base_model_path", type=str, default=get_base_model_path(), help="Path to full base model (needed when --model_path only contains LoRA adapters)")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--save_dir", type=str, default=str(_project_root() / "outputs" / "infer"))

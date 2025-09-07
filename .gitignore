@@ -70,7 +70,8 @@ temp/
 # Configuration files with sensitive info
 config_local.yaml
 .env.local
-local_paths.yaml
+local_paths.yaml    # Legacy - use user_config.yaml instead
+user_config.yaml    # User-specific configuration overrides
 
 # Jupyter
 .ipynb_checkpoints/
