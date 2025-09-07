@@ -12,7 +12,7 @@ data:
 
 # Training configuration for current experiments
 training:
-  output_dir: "/home/shebd/4_Collaboration/FYP2526/output/models"
+  output_dir: "/home/shebd/4_Collaboration/FYP2526/output/models/run_9.7_fred"
 
 # Evaluation paths for shebd's environment
 evaluation:

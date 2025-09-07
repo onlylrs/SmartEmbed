@@ -5,7 +5,7 @@
 #SBATCH --account=medimgfmod
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=28
 #SBATCH --time=96:00:00
 #SBATCH --output=%x-%j.out
