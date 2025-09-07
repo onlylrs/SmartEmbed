@@ -354,7 +354,7 @@ def load_processor_and_freeze(model_path: str) -> JinaEmbeddingsV4Processor:
         Loaded and frozen processor
     """
     # Load processor and model
-    processor = JinaEmbeddingsV4Processor.from_pretrained(model_path, trust_remote_code=True)
+    processor = JinaEmbeddingsV4Processor.from_pretrained(model_path, trust_remote_code=True, use_fast=True)
     # model = JinaEmbeddingsV4Model.from_pretrained(model_path, trust_remote_code=True)
     
     # # Freeze all parameters
@@ -393,11 +393,9 @@ def get_training_dataloader(
     """
     # Resolve model path: explicit argument > unified config > fallback relative path
     if model_path is None:
-        try:
-            config = load_config()
-            model_path = config.get('model', {}).get('base_model_path')
-        except Exception:
-            pass
+        config = load_config()
+        model_path = config.get('model', {}).get('base_model_path')
+        
         
         if not model_path:
             model_path = str(Path(__file__).resolve().parents[2] / "jina-embeddings-v4-base")

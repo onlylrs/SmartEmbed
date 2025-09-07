@@ -120,7 +120,7 @@ def create_training_config_from_unified(config: Dict[str, Any], args: Any = None
     Returns:
         JinaTrainingConfig object
     """
-    from ..training.training_config import JinaTrainingConfig
+    from ..training.config_schema import JinaTrainingConfig
     
     # Handle command line overrides
     if args:
@@ -138,11 +138,7 @@ def create_training_config_from_unified(config: Dict[str, Any], args: Any = None
     training_config = JinaTrainingConfig(
         # Model settings
         model_name_or_path=get_model_path(config),
-        config_name=config['model']['config_name'],
-        tokenizer_name=config['model']['tokenizer_name'],
-        cache_dir=config['model']['cache_dir'],
         model_revision=config['model']['model_revision'],
-        use_auth_token=config['model']['use_auth_token'],
         torch_dtype=config['model']['torch_dtype'],
         trust_remote_code=config['model']['trust_remote_code'],
         
@@ -188,7 +184,6 @@ def create_training_config_from_unified(config: Dict[str, Any], args: Any = None
         lora_alpha=config['training']['lora_alpha'],
         lora_dropout=config['training']['lora_dropout'],
         lora_bias=config['training']['lora_bias'],
-        lora_target_modules=config['training']['lora_target_modules'],
         task_names=config['training']['task_names'],
         enable_visual_lora=config['training']['enable_visual_lora'],
         

@@ -44,15 +44,12 @@ from peft import PeftModel
 
 def _default_model_path() -> str:
     """Get default model path from unified config system"""
-    try:
-        config = load_config()
-        # Try to get from training output directory
-        output_dir = config.get('training', {}).get('output_dir', 'outputs/models')
-        candidate = _project_root() / output_dir / "finetuned"
-        if candidate.exists():
-            return str(candidate)
-    except Exception:
-        pass
+    config = load_config()
+    # Try to get from training output directory
+    output_dir = config.get('training', {}).get('output_dir', 'outputs/models')
+    candidate = _project_root() / output_dir / "finetuned"
+    if candidate.exists():
+        return str(candidate)
     
     # Fallback to default location
     candidate = _project_root() / "outputs" / "models" / "finetuned"

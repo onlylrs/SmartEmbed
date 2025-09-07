@@ -1,7 +1,7 @@
 """
-Training configuration for Jina Embeddings V4 training.
+Configuration schema for Jina Embeddings V4 training.
 
-This file now only contains the JinaTrainingConfig class structure.
+This file contains the data structure definitions for training configurations.
 All default values are managed through the unified configuration system:
 - system_config.yaml (system defaults)
 - user_config.yaml (user overrides)
@@ -16,7 +16,7 @@ import torch
 
 @dataclass
 class JinaTrainingConfig:
-    """Configuration class for Jina Embeddings V4 training.
+    """Configuration schema for Jina Embeddings V4 training.
     
     This class defines the structure of training configuration parameters.
     Default values are now managed by the unified configuration system.
@@ -24,14 +24,10 @@ class JinaTrainingConfig:
     """
     
     # Model settings
-    model_name_or_path: str = None
-    config_name: Optional[str] = None
-    tokenizer_name: Optional[str] = None
-    cache_dir: Optional[str] = None
-    model_revision: str = "main"
-    use_auth_token: bool = False
-    torch_dtype: Optional[str] = "auto"
-    trust_remote_code: bool = True
+    model_name_or_path: Optional[str] = None  # Model path or name (provided via config system)
+    model_revision: str = "main"              # Git branch/tag for model version control
+    torch_dtype: Optional[str] = "auto"       # Data type for model weights (auto/float16/bfloat16)
+    trust_remote_code: bool = True            # Required for Jina custom model architecture
     
     # Training hyperparameters
     output_dir: str = "./results"
@@ -69,15 +65,12 @@ class JinaTrainingConfig:
     
     # LoRA settings
     use_lora: bool = True
-    lora_r: int = 16
-    lora_alpha: int = 16
-    lora_dropout: float = 0.1
-    lora_target_modules: List[str] = field(default_factory=lambda: [
-        "(.*(model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(single_vector_projector|multi_vector_projector).*$)"
-    ])
-    lora_bias: str = "none"
-    task_names: List[str] = field(default_factory=lambda: ["retrieval", "text-matching", "code"])
-    enable_visual_lora: bool = False
+    lora_r: int = 16                                         # LoRA rank - controls adaptation capacity
+    lora_alpha: int = 16                                     # LoRA scaling factor
+    lora_dropout: float = 0.1                                # Dropout rate for LoRA layers
+    lora_bias: str = "none"                                  # LoRA bias configuration
+    task_names: List[str] = field(default_factory=lambda: ["retrieval", "text-matching", "code"])  # Task names for multi-adapter LoRA
+    enable_visual_lora: bool = False                         # Apply LoRA to visual components
     
     # Jina-specific settings
     single_vector_pool_strategy: str = "mean"

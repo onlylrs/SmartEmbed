@@ -339,27 +339,19 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
                 logging.getLogger(name).setLevel(level)
         
         if rank == 0:
-            try:
-                name_or_path = getattr(getattr(model, "config", object()), "_name_or_path", "<unknown>")
-            except Exception:
-                name_or_path = "<unknown>"
+            name_or_path = getattr(getattr(model, "config", object()), "_name_or_path", "<unknown>")
             is_peft = hasattr(model, "peft_config")
             active_adapter = None
             available_adapters = []
-            try:
-                if is_peft:
-                    # peft_config is a dict name->cfg
-                    available_adapters = list(getattr(model, "peft_config", {}).keys())
-                    # active adapter name is stored in model.active_adapter for LoRA
-                    active_adapter = getattr(model, "active_adapter", None)
-            except Exception:
-                pass
+            if is_peft:
+                # peft_config is a dict name->cfg
+                available_adapters = list(getattr(model, "peft_config", {}).keys())
+                # active adapter name is stored in model.active_adapter for LoRA
+                active_adapter = getattr(model, "active_adapter", None)
             print(
                 f"Model loaded successfully! name_or_path={name_or_path}, peft={is_peft}, "
                 f"active_adapter={active_adapter}, adapters={available_adapters}"
             )
-    finally:
-        pass # No explicit cleanup needed for model, it's managed by torch.inference_mode
 
     images, texts, img_to_text_idxs, text_to_img_idx = load_eval_data(jsonl_path)
     if len(images) == 0 or len(texts) == 0:
@@ -409,11 +401,8 @@ def main():
     parser.add_argument("--data_jsonl", type=str, default=_find_default_data(), help="Path to JSONL eval data")
     parser.add_argument("--model_path", type=str, default=_default_model_path(), help="Path to finetuned model directory")
     def get_base_model_path():
-        try:
-            config = load_config()
-            return config.get('model', {}).get('base_model_path')
-        except Exception:
-            return None
+        config = load_config()
+        return config.get('model', {}).get('base_model_path')
     
     parser.add_argument("--base_model_path", type=str, default=get_base_model_path(), help="Path to full base model (needed when --model_path only contains LoRA adapters)")
     parser.add_argument("--batch_size", type=int, default=32)
