@@ -1,0 +1,62 @@
+# =============================================================================
+# USER CONFIGURATION TEMPLATE
+# =============================================================================
+# Copy this file to user_config.yaml and modify the values you want to override.
+# Only include the parameters you want to change from the system defaults.
+# This file will override corresponding values in system_config.yaml.
+#
+# Example: If you only want to change the batch size and model path, your 
+# user_config.yaml would contain:
+#
+# model:
+#   base_model_path: "/your/custom/path/to/jina-embeddings-v4"
+# training:
+#   per_device_train_batch_size: 8
+#
+# =============================================================================
+
+# Model Configuration (Override model paths for your environment)
+model:
+  base_model_path: "/path/to/your/jina-embeddings-v4"
+
+# Training Configuration (Override training parameters)
+training:
+  # Reduce batch size if you have limited GPU memory
+  per_device_train_batch_size: 8
+  per_device_eval_batch_size: 4
+  
+  # Adjust epochs and learning rate for your experiment
+  num_train_epochs: 50
+  learning_rate: 5e-5
+  
+  # Set your output directory
+  output_dir: "/path/to/your/output/directory"
+  
+  # LoRA settings
+  use_lora: true
+  lora_r: 32
+  lora_alpha: 32
+
+# Data Configuration (Override data paths)
+data:
+  train_data: "/path/to/your/train.jsonl"
+  eval_data: "/path/to/your/eval.jsonl"
+  image_base_dir: "/path/to/your/images"
+
+# Hardware Configuration (Override for your setup)
+runtime:
+  default_gpus: "0,1"  # Use fewer GPUs
+  default_run_mode: "single"  # Use single GPU mode
+
+# WandB Configuration
+wandb:
+  enabled: false  # Disable wandb logging
+  # enabled: true
+  # entity: "your-wandb-entity"
+  # project: "your-project-name"
+
+# System Configuration (Override for your hardware)
+system:
+  bf16: false  # Disable bf16 for older GPUs
+  fp16: true   # Use fp16 instead
+  gradient_checkpointing: true  # Enable to save memory

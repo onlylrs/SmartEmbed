@@ -1,0 +1,188 @@
+# =============================================================================
+# SYSTEM DEFAULT CONFIGURATION - DO NOT MODIFY THIS FILE
+# =============================================================================
+# This file contains all default configuration parameters for the SmartEmbed project.
+# For user customizations, create a user_config.yaml file that will override these defaults.
+# The user_config.yaml file should contain only the parameters you want to change.
+#
+# Current configuration priority (high to low):
+# 1. Command line arguments (--epochs, --batch_size, etc.)
+# 2. user_config.yaml (if exists)
+# 3. system_config.yaml (this file - defaults)
+# =============================================================================
+
+# Model Configuration
+model:
+  # Base model path - will use local_paths.yaml or user_config.yaml override
+  base_model_path: "/project/medimgfmod/Generalist/0_Pretrained/jina-embeddings-v4"
+  config_name: null
+  tokenizer_name: null
+  cache_dir: null
+  model_revision: "main"
+  use_auth_token: false
+  torch_dtype: "auto"
+  trust_remote_code: true
+
+# Training Configuration
+training:
+  # Core training parameters
+  output_dir: "outputs/models"
+  overwrite_output_dir: false
+  do_train: true
+  do_eval: true
+  
+  # Training hyperparameters (current effective values from project_config.yaml + training_config.py analysis)
+  num_train_epochs: 30                    # From project_config.yaml
+  per_device_train_batch_size: 16         # From project_config.yaml (overrides training_config.py default of 1)
+  per_device_eval_batch_size: 8           # Derived as half of train batch size
+  gradient_accumulation_steps: 1          # From training_config.py default
+  learning_rate: 1e-4                     # From project_config.yaml (overrides training_config.py default of 5e-5)
+  weight_decay: 0.01                      # From training_config.py
+  
+  # Optimizer settings
+  adam_beta1: 0.9                         # From training_config.py
+  adam_beta2: 0.999                       # From training_config.py
+  adam_epsilon: 1e-8                      # From training_config.py
+  max_grad_norm: 1.0                      # From training_config.py
+  
+  # Learning rate scheduler
+  lr_scheduler_type: "linear"             # From training_config.py
+  warmup_ratio: 0.1                       # From training_config.py
+  warmup_steps: 0                         # From training_config.py
+  
+  # Evaluation and logging
+  evaluation_strategy: "steps"            # From training_config.py
+  eval_steps: 500                         # From training_config.py
+  logging_strategy: "steps"               # From training_config.py
+  logging_steps: 10                       # From training_config.py
+  save_strategy: "steps"                  # From training_config.py
+  save_steps: 500                         # From training_config.py
+  save_total_limit: 2                     # From training_config.py
+  
+  # LoRA Configuration
+  use_lora: true                          # From project_config.yaml
+  lora_r: 16                              # From project_config.yaml (overrides training_config.py default of 32)
+  lora_alpha: 16                          # From project_config.yaml (overrides training_config.py default of 32)
+  lora_dropout: 0.1                       # From project_config.yaml
+  lora_bias: "none"                       # From training_config.py
+  lora_target_modules:                    # From training_config.py
+    - "(.*(model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(single_vector_projector|multi_vector_projector).*$)"
+  task_names:                             # From training_config.py
+    - "retrieval"
+    - "text-matching"
+    - "code"
+  enable_visual_lora: false               # From training_config.py
+
+# Data Configuration
+data:
+  # Data paths (from shell scripts analysis)
+  train_data: "data/train_full_path.jsonl"          # Most commonly used path in scripts
+  eval_data: "data/eval.jsonl"                      # From slurm_evaluate.sh
+  image_base_dir: "data/Images"                     # From project_config.yaml
+  
+  # Data processing settings
+  max_seq_length: 256                     # From project_config.yaml (overrides training_config.py default of 128)
+  preprocessing_num_workers: 1            # From training_config.py
+  dataloader_num_workers: 0               # From training_config.py
+  dataloader_pin_memory: true             # From training_config.py
+  dataloader_drop_last: true              # From training_config.py
+
+# Jina-specific Model Settings
+jina_model:
+  single_vector_pool_strategy: "mean"     # From training_config.py
+  multi_vector_projector_dim: 128         # From training_config.py
+  matryoshka_dims:                        # From training_config.py
+    - 128
+    - 256
+    - 512
+    - 1024
+    - 2048
+  use_matryoshka: false                   # From training_config.py
+
+# Loss Function Configuration
+loss:
+  temperature: 0.02                       # From training_config.py (used in train.py)
+  margin: 0.0                             # From training_config.py (used in train.py)
+  use_miner: false                        # From training_config.py
+  miner_margin: 0.2                       # From training_config.py
+  type_of_triplets: "all"                 # From training_config.py
+  use_simplified_contrastive: true        # From training_config.py
+  negative_sampling_strategy: "random"    # From training_config.py
+  num_negatives: 7                        # From training_config.py
+
+# System and Hardware Configuration
+system:
+  # Memory and performance settings
+  bf16: true                              # From project_config.yaml (overrides training_config.py fp16)
+  fp16: false                             # Disabled when bf16 is true
+  tf32: true                              # From training_config.py
+  gradient_checkpointing: true            # From training_config.py
+  max_memory_MB: 20000                    # From training_config.py
+  
+  # Random seeds
+  seed: 42                                # From training_config.py
+  data_seed: 42                           # From training_config.py
+  
+  # Distributed training settings
+  local_rank: -1                          # From training_config.py
+  use_cpu: false                          # From training_config.py
+  ddp_find_unused_parameters: true        # From training_config.py
+
+# Hardware Runtime Configuration (from shell scripts analysis)
+runtime:
+  # Default hardware settings (can be overridden by shell scripts)
+  default_run_mode: "distributed"         # From slurm_train.sh
+  default_gpus: "0,1,2,3"                 # From slurm_train.sh
+  default_num_proc: 4                     # From slurm_train.sh
+  
+  # SLURM-specific configuration (used by slurm_train.sh)
+  slurm_run_mode: "distributed"           # Force distributed for SLURM
+  slurm_gpus: "0,1,2,3"                   # Default SLURM GPU allocation
+  slurm_num_proc: 4                       # Default SLURM process count
+  
+  # SLURM job configuration
+  slurm_partition: "medimgfmod"           # From slurm scripts
+  slurm_account: "medimgfmod"             # From slurm scripts
+  slurm_nodes: 1                          # From slurm scripts
+  slurm_ntasks_per_node: 1                # From slurm scripts
+  slurm_gres_gpu: 4                       # From slurm_train.sh
+  slurm_cpus_per_task: 28                 # From slurm scripts
+  slurm_time: "96:00:00"                  # From slurm_train.sh
+
+# Evaluation Configuration (from evaluation scripts)
+evaluation:
+  # Evaluation-specific settings
+  eval_batch_size: 16                     # From slurm_evaluate.sh (most recent value)
+  eval_max_length: 512                    # From training_config.py
+  eval_device: "cuda"                     # From evaluation scripts
+  
+  # Evaluation data paths (different between scripts - using most recent)
+  eval_data_jsonl: "/home/shebd/4_Collaboration/FYP2526/data/eval.jsonl"    # From slurm_evaluate.sh
+  eval_model_path: "/home/shebd/4_Collaboration/FYP2526/output/models/run_0/checkpoint-1000"  # Example from slurm_evaluate.sh
+  eval_base_model_path: "/home/shebd/4_Collaboration/FYP2526/jina-embeddings-v4"             # From slurm_evaluate.sh
+
+# Inference Configuration (from run_infer.sh)
+inference:
+  infer_batch_size: 4                     # From run_infer.sh
+  infer_device: "cuda"                    # From run_infer.sh
+  save_topk: false                        # From run_infer.sh
+  topk: 10                                # From run_infer.sh
+  prompt_name: "query"                    # From run_infer.sh
+  save_dir: "/project/fyp25_hc2/results/infer"  # From run_infer.sh
+
+# WandB Configuration
+wandb:
+  entity: "smart-search-fyp"              # From project_config.yaml
+  project: "jina-embeddings-finetune"     # From project_config.yaml
+  enabled: true                           # From project_config.yaml
+  
+# Logging and Monitoring
+logging:
+  report_to: []                           # From training_config.py (empty list means no external reporting)
+  run_name: null                          # From training_config.py (will be auto-generated)
+  logging_dir: null                       # From training_config.py
+  
+# Resume Training
+resume:
+  resume_from_checkpoint: null            # From training_config.py
+  ignore_data_skip: false                 # From training_config.py

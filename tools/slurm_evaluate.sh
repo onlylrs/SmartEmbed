@@ -20,16 +20,21 @@ conda activate FYP2526_qwen
 
 # === 设置路径 ===
 SCRIPT_DIR="/home/shebd/4_Collaboration/FYP2526"    # 你的脚本所在路径
-REPO_ROOT="/home/shebd/4_Collaboration/FYP2526/SmartEmbed_liam"
+REPO_ROOT="/home/shebd/4_Collaboration/FYP2526/FYP2526_fred"
 ENTRYPOINT="${REPO_ROOT}/jina/eval/cross_retrieval_eval.py"
 
+# Load evaluation configuration from unified config
+cd "$REPO_ROOT"
+eval $(python tools/get_config.py --section evaluation)
+eval $(python tools/get_config.py --section runtime)
+
 # === 评估参数配置 ===
-DATA_JSONL="/home/shebd/4_Collaboration/FYP2526/data/eval.jsonl"
-MODEL_PATH="/home/shebd/4_Collaboration/FYP2526/output/models/run_0/checkpoint-1000"  # 使用训练好的模型
-BASE_MODEL_PATH="/home/shebd/4_Collaboration/FYP2526/jina-embeddings-v4"              # 基础模型路径
-IMAGE_BASE_DIR="/scratch/medimgfmod/Generalist/medical"     # 图片基础目录
-BATCH_SIZE=16
-DEVICE="cuda"
+DATA_JSONL="${EVAL_DATA:-/home/shebd/4_Collaboration/FYP2526/data/eval.jsonl}"
+MODEL_PATH="${EVAL_MODEL_PATH:-/home/shebd/4_Collaboration/FYP2526/output/models/run_0/checkpoint-1000}"  # 使用训练好的模型
+BASE_MODEL_PATH="${EVAL_BASE_MODEL_PATH:-/home/shebd/4_Collaboration/FYP2526/jina-embeddings-v4}"              # 基础模型路径
+IMAGE_BASE_DIR="${EVAL_IMAGE_BASE_DIR:-/scratch/medimgfmod/Generalist/medical}"     # 图片基础目录
+BATCH_SIZE="${EVAL_BATCH_SIZE:-16}"
+DEVICE="${EVAL_DEVICE:-cuda}"
 
 # === 启动评估 ===
 cd "$REPO_ROOT"

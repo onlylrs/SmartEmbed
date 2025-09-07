@@ -30,6 +30,9 @@ from jina.models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
 from jina.training.jina_trainer import JinaEmbeddingTrainer, setup_model_for_training
 from jina.training.training_config import JinaTrainingConfig
 
+# Import unified configuration manager
+from jina.utils.config_manager import load_config, create_training_config_from_unified
+
 # Import Liam's data loading solution
 from jina.data.multimodal_dataset import get_training_dataloader
 
@@ -63,90 +66,52 @@ def parse_args():
     return parser.parse_args()
 
 
-def load_config():
-    """Load configuration from project_config.yaml"""
-    config_path = project_root / "project_config.yaml"
-    if not config_path.exists():
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    return config
+def load_project_config():
+    """Load configuration using unified config system"""
+    return load_config()
 
 
-def create_training_config(project_config, args):
+def create_training_config(config, args):
     """
-    将用户友好的 project_config.yaml 转换为代码需要的 JinaTrainingConfig 对象
-    ┌─────────────────────────────────────────────────────────────────────┐
-    │ project_config.yaml (用户编辑)  →  JinaTrainingConfig (代码使用)    │
-    ├─────────────────────────────────────────────────────────────────────┤
-    │ base_model_path                 →  model_name_or_path               │
-    │ training.epochs                 →  num_train_epochs                 │
-    │ training.batch_size             →  per_device_train_batch_size      │
-    │ training.learning_rate          →  learning_rate                    │
-    │ system.max_seq_length           →  max_seq_length                   │
-    │ lora.*                          →  lora_* (直接映射)                │
-    │ (默认值)                        →  temperature, margin, 等损失函数参数 │
-    └─────────────────────────────────────────────────────────────────────┘
+    Create JinaTrainingConfig from unified configuration system.
+    
     Args:
-        project_config: 从 project_config.yaml 加载的字典
-        args: 命令行参数，可以覆盖配置文件设置
+        config: 从 load_config() 获取的统一配置字典
+        args: 命令行参数对象
         
     Returns:
         JinaTrainingConfig: 包含所有必需参数的完整配置对象
     """
+    return create_training_config_from_unified(config, args)
+
+
+def create_training_config(config, args):
+    """
+    Create JinaTrainingConfig from unified configuration system.
     
-    # Override with command line arguments if provided
-    epochs = args.epochs or project_config['training']['epochs']
-    batch_size = args.batch_size or project_config['training']['batch_size']
-    learning_rate = args.learning_rate or project_config['training']['learning_rate']
-    output_dir = args.output_dir or str(project_root / project_config['training']['output_dir'] / 'finetuned')
-    
-    # Create and return JinaTrainingConfig with project_config values
-    training_config = JinaTrainingConfig(
-        # Model settings (use get_path for consistency with local_paths.yaml)
-        # model_name_or_path will use default which calls get_path("base_model_path")
-        trust_remote_code=True,
+    Args:
+        config: 从 load_config() 获取的统一配置字典
+        args: 命令行参数对象
         
-        # Training hyperparameters (from project_config + args override)
-        output_dir=output_dir,
-        num_train_epochs=epochs,
-        per_device_train_batch_size=batch_size,
-        learning_rate=learning_rate,
-        
-        # System settings (from project_config)
-        max_seq_length=project_config['system']['max_seq_length'],
-        
-        # LoRA settings (from project_config)
-        use_lora=project_config['training']['use_lora'],
-        lora_r=project_config['lora']['r'],
-        lora_alpha=project_config['lora']['alpha'],
-        lora_dropout=project_config['lora']['dropout'],
-        
-        # Loss function settings
-        temperature=0.02,                    
-        margin=0.0,                         
-        matryoshka_dims=[128, 256, 512, 1024],  
-        use_matryoshka=False,               # 暂时禁用，专注基础训练
-    )
-    
-    return training_config
+    Returns:
+        JinaTrainingConfig: 包含所有必需参数的完整配置对象
+    """
+    return create_training_config_from_unified(config, args)
     """ 
-    train过程中config的加载和覆盖优先级: 
+    Configuration loading priority (from unified config system):
     1. 命令行参数
-    2. project_config.yaml
-    3. train中的 hard code 部分 - 用于处理命令行没有相关参数的情况如data/train.jsonl
-    4. training_config.py 中默认值 - JinaTrainingConfig class 为所有para提供了default value
+    2. user_config.yaml (if exists)
+    3. system_config.yaml (system defaults)
     """
 
 def main():
     """Main training function"""
     args = parse_args()
     
-    # Load configuration
-    config = load_config()
+    # Load unified configuration
+    config = load_project_config()
     
-    # Create unified training configuration
+    # Create training configuration from unified config + args
     training_config = create_training_config(config, args)
 
     # Pre-compute wandb_enabled so that it's always defined, even if an
