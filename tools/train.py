@@ -268,7 +268,7 @@ def main():
             gradient_accumulation_steps=getattr(training_config, 'gradient_accumulation_steps', 1),
             warmup_steps=100,
             logging_steps=10,
-            save_steps=500,
+            save_steps=1,
             eval_steps=500 if eval_dataset else None,
             eval_strategy="steps" if eval_dataset else "no",  # Fixed back to correct parameter name
             save_strategy="steps",

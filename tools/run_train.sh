@@ -2,14 +2,14 @@
 set -euo pipefail
 
 # User-configurable settings
-RUN_MODE="single"   # "single" or "distributed"
-GPUS="1"            # e.g., "0" or "0,1,2,3"; for single, first id is used
+RUN_MODE="distributed"   # "single" or "distributed"
+GPUS="0,1"            # e.g., "0" or "0,1,2,3"; for single, first id is used
 NUM_PROC=""               # optional override; if empty, derived from number of GPUS
 
 # Optional override paths (usually set in project_config.yaml)
 TRAIN_DATA="/home/shebd/4_Collaboration/FYP2526/data/train_full_path.jsonl"             # leave empty to use default from tools/train.py
 EVAL_DATA=""              # optional
-OUTPUT_DIR="/home/shebd/4_Collaboration/FYP2526/output/models/run_2"             # Optional: Override for the training output directory. If empty, uses default from config.
+OUTPUT_DIR="/home/shebd/4_Collaboration/FYP2526/output/models/run_9.7"             # Optional: Override for the training output directory. If empty, uses default from config.
 
 # Script paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
