@@ -1,0 +1,20 @@
+# User Configuration for shebd
+# This file overrides system_config.yaml defaults for this user's environment
+
+# Model path for shebd's environment
+model:
+  base_model_path: "/home/shebd/4_Collaboration/FYP2526/jina-embeddings-v4"
+
+# Data paths for shebd's environment  
+data:
+  train_data: "/home/shebd/4_Collaboration/FYP2526/data/train_full_path.jsonl"
+  eval_data: "/home/shebd/4_Collaboration/FYP2526/data/eval.jsonl"
+
+# Training configuration for current experiments
+training:
+  output_dir: "/home/shebd/4_Collaboration/FYP2526/output/models"
+
+# Evaluation paths for shebd's environment
+evaluation:
+  eval_data_jsonl: "/home/shebd/4_Collaboration/FYP2526/data/eval.jsonl"
+  eval_base_model_path: "/home/shebd/4_Collaboration/FYP2526/jina-embeddings-v4"

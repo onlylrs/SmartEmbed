@@ -1,0 +1,182 @@
+# =============================================================================
+# SYSTEM DEFAULT CONFIGURATION - DO NOT MODIFY THIS FILE
+# =============================================================================
+# This file contains all default configuration parameters for the SmartEmbed project.
+# For user customizations, create a user_config.yaml file that will override these defaults.
+# The user_config.yaml file should contain only the parameters you want to change.
+#
+# Current configuration priority (high to low):
+# 1. Command line arguments (--epochs, --batch_size, etc.)
+# 2. user_config.yaml (if exists)
+# 3. system_config.yaml (this file - defaults)
+# =============================================================================
+
+# Model Configuration
+model:
+  # Base model path - will use local_paths.yaml or user_config.yaml override
+  base_model_path: "/project/medimgfmod/Generalist/0_Pretrained/jina-embeddings-v4"
+  model_revision: "main"              # Git branch/tag for model version control
+  torch_dtype: "auto"                 # Data type for model weights (auto/float16/bfloat16)
+  trust_remote_code: true             # Required for Jina custom model architecture
+
+# Training Configuration
+training:
+  # Core training parameters
+  output_dir: "outputs/models"
+  overwrite_output_dir: false
+  do_train: true
+  do_eval: true
+  
+  # Training hyperparameters
+  num_train_epochs: 30                    # Number of training epochs
+  per_device_train_batch_size: 16         # Training batch size per device
+  per_device_eval_batch_size: 8           # Evaluation batch size per device
+  gradient_accumulation_steps: 1          # Steps to accumulate gradients
+  learning_rate: 1e-4                     # Initial learning rate
+  weight_decay: 0.01                      # Weight decay for regularization
+  
+  # Optimizer settings
+  adam_beta1: 0.9                         # Adam beta1 parameter
+  adam_beta2: 0.999                       # Adam beta2 parameter
+  adam_epsilon: 1e-8                      # Adam epsilon for numerical stability
+  max_grad_norm: 1.0                      # Maximum gradient norm for clipping
+  
+  # Learning rate scheduler
+  lr_scheduler_type: "linear"             # Type of learning rate scheduler
+  warmup_ratio: 0.1                       # Warmup ratio for learning rate
+  warmup_steps: 0                         # Number of warmup steps
+  
+  # Evaluation and logging
+  evaluation_strategy: "steps"            # When to run evaluation
+  eval_steps: 500                         # Steps between evaluations
+  logging_strategy: "steps"               # When to log metrics
+  logging_steps: 10                       # Steps between logging
+  save_strategy: "steps"                  # When to save checkpoints
+  save_steps: 500                            # Steps between checkpoint saves # DEBUG: can be changed to 1 for frequent saving
+  save_total_limit: 2                     # Maximum number of checkpoints to keep
+  
+  # LoRA Configuration
+  use_lora: true                          # Enable LoRA fine-tuning
+  lora_r: 16                              # LoRA rank - controls adaptation capacity
+  lora_alpha: 16                          # LoRA scaling factor
+  lora_dropout: 0.1                       # Dropout rate for LoRA layers
+  lora_bias: "none"                       # LoRA bias configuration
+  task_names:                             # Task names for multi-adapter LoRA
+    - "retrieval"
+    - "text-matching"
+    - "code"
+  enable_visual_lora: false               # Apply LoRA to visual components
+
+# Data Configuration
+data:
+  # Data paths
+  train_data: "data/train_full_path.jsonl"          # Training data file path
+  eval_data: "data/eval.jsonl"                      # Evaluation data file path
+  image_base_dir: "data/Images"                     # Base directory for images
+  
+  # Data processing settings
+  max_seq_length: 256                     # Maximum sequence length for text
+  preprocessing_num_workers: 1            # Workers for data preprocessing
+  dataloader_num_workers: 0               # Workers for data loading
+  dataloader_pin_memory: true             # Pin memory for faster GPU transfer
+  dataloader_drop_last: true              # Drop last incomplete batch
+
+# Jina-specific Model Settings
+jina_model:
+  single_vector_pool_strategy: "mean"     # Pooling strategy for single vector output
+  multi_vector_projector_dim: 128         # Dimension for multi-vector projector
+  matryoshka_dims:                        # Supported Matryoshka embedding dimensions
+    - 128
+    - 256
+    - 512
+    - 1024
+    - 2048
+  use_matryoshka: false                   # Enable Matryoshka representation learning
+
+# Loss Function Configuration
+loss:
+  temperature: 0.02                       # Temperature for contrastive learning
+  margin: 0.0                             # Margin for triplet loss
+  use_miner: false                        # Use hard negative mining
+  miner_margin: 0.2                       # Margin for negative mining
+  type_of_triplets: "all"                 # Type of triplets to use
+  use_simplified_contrastive: true        # Use simplified contrastive loss
+  negative_sampling_strategy: "random"    # Strategy for negative sampling
+  num_negatives: 7                        # Number of negative samples
+
+# System and Hardware Configuration
+system:
+  # Memory and performance settings
+  bf16: true                              # Use bfloat16 precision
+  fp16: false                             # Use float16 precision (disabled when bf16=true)
+  tf32: true                              # Use TensorFloat-32 on Ampere GPUs
+  gradient_checkpointing: true            # Enable gradient checkpointing to save memory
+  max_memory_MB: 20000                    # Maximum memory usage in MB
+  
+  # Random seeds
+  seed: 42                                # Global random seed
+  data_seed: 42                           # Data shuffling seed
+  
+  # Distributed training settings
+  local_rank: -1                          # Local rank for distributed training
+  use_cpu: false                          # Force CPU usage
+  ddp_find_unused_parameters: true        # Find unused parameters in DDP
+
+# Hardware Runtime Configuration
+runtime:
+  # Default hardware settings
+  default_run_mode: "distributed"         # Default training mode
+  default_gpus: "0,1"                     # Default GPU allocation (2 GPUs)
+  default_num_proc: 2                     # Default number of processes
+  
+  # SLURM-specific configuration
+  slurm_run_mode: "distributed"           # Training mode for SLURM jobs
+  slurm_gpus: "0,1"                       # GPU allocation for SLURM (2 GPUs)
+  slurm_num_proc: 2                       # Number of processes for SLURM
+  
+  # SLURM job configuration
+  slurm_partition: "medimgfmod"           # SLURM partition name
+  slurm_account: "medimgfmod"             # SLURM account name
+  slurm_nodes: 1                          # Number of nodes
+  slurm_ntasks_per_node: 1                # Tasks per node
+  slurm_gres_gpu: 2                       # GPU resources per node (2 GPUs)
+  slurm_cpus_per_task: 28                 # CPU cores per task
+  slurm_time: "96:00:00"                  # Maximum job runtime
+
+# Evaluation Configuration
+evaluation:
+  # Evaluation-specific settings
+  eval_batch_size: 16                     # Batch size for evaluation
+  eval_max_length: 512                    # Maximum sequence length for evaluation
+  eval_device: "cuda"                     # Device for evaluation
+  
+  # Evaluation data paths
+  eval_data_jsonl: "/home/shebd/4_Collaboration/FYP2526/data/eval.jsonl"    # Evaluation data file
+  eval_model_path: "/home/shebd/4_Collaboration/FYP2526/output/models/run_0/checkpoint-1000"  # Model checkpoint path
+  eval_base_model_path: "/home/shebd/4_Collaboration/FYP2526/jina-embeddings-v4"             # Base model path for evaluation
+
+# Inference Configuration
+inference:
+  infer_batch_size: 4                     # Batch size for inference
+  infer_device: "cuda"                    # Device for inference
+  save_topk: false                        # Save top-k results
+  topk: 10                                # Number of top results to retrieve
+  prompt_name: "query"                    # Prompt name for inference
+  save_dir: "/project/fyp25_hc2/results/infer"  # Output directory for inference results
+
+# WandB Configuration
+wandb:
+  entity: "smart-search-fyp"              # WandB team/user name
+  project: "jina-embeddings-finetune"     # WandB project name
+  enabled: true                           # Enable WandB logging
+  
+# Logging and Monitoring
+logging:
+  report_to: []                           # External reporting tools (empty = no external reporting)
+  run_name: null                          # Run name for logging (auto-generated if null)
+  logging_dir: null                       # Directory for logging files
+  
+# Resume Training
+resume:
+  resume_from_checkpoint: null            # Path to checkpoint for resuming training
+  ignore_data_skip: false                 # Skip data that was already processed

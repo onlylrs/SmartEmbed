@@ -28,7 +28,10 @@ from transformers import AutoModel
 from jina.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
 from jina.models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
 from jina.training.jina_trainer import JinaEmbeddingTrainer, setup_model_for_training
-from jina.training.training_config import JinaTrainingConfig
+from jina.training.config_schema import JinaTrainingConfig
+
+# Import unified configuration manager
+from jina.utils.config_manager import load_config, create_training_config_from_unified
 
 # Import Liam's data loading solution
 from jina.data.multimodal_dataset import get_training_dataloader
@@ -63,104 +66,37 @@ def parse_args():
     return parser.parse_args()
 
 
-def load_config():
-    """Load configuration from project_config.yaml"""
-    config_path = project_root / "project_config.yaml"
-    if not config_path.exists():
-        raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    
-    return config
+def load_project_config():
+    """Load configuration using unified config system"""
+    return load_config()
 
-
-def create_training_config(project_config, args):
-    """
-    将用户友好的 project_config.yaml 转换为代码需要的 JinaTrainingConfig 对象
-    ┌─────────────────────────────────────────────────────────────────────┐
-    │ project_config.yaml (用户编辑)  →  JinaTrainingConfig (代码使用)    │
-    ├─────────────────────────────────────────────────────────────────────┤
-    │ base_model_path                 →  model_name_or_path               │
-    │ training.epochs                 →  num_train_epochs                 │
-    │ training.batch_size             →  per_device_train_batch_size      │
-    │ training.learning_rate          →  learning_rate                    │
-    │ system.max_seq_length           →  max_seq_length                   │
-    │ lora.*                          →  lora_* (直接映射)                │
-    │ (默认值)                        →  temperature, margin, 等损失函数参数 │
-    └─────────────────────────────────────────────────────────────────────┘
-    Args:
-        project_config: 从 project_config.yaml 加载的字典
-        args: 命令行参数，可以覆盖配置文件设置
-        
-    Returns:
-        JinaTrainingConfig: 包含所有必需参数的完整配置对象
-    """
-    
-    # Override with command line arguments if provided
-    epochs = args.epochs or project_config['training']['epochs']
-    batch_size = args.batch_size or project_config['training']['batch_size']
-    learning_rate = args.learning_rate or project_config['training']['learning_rate']
-    output_dir = args.output_dir or str(project_root / project_config['training']['output_dir'] / 'finetuned')
-    
-    # Create and return JinaTrainingConfig with project_config values
-    training_config = JinaTrainingConfig(
-        # Model settings (use get_path for consistency with local_paths.yaml)
-        # model_name_or_path will use default which calls get_path("base_model_path")
-        trust_remote_code=True,
-        
-        # Training hyperparameters (from project_config + args override)
-        output_dir=output_dir,
-        num_train_epochs=epochs,
-        per_device_train_batch_size=batch_size,
-        learning_rate=learning_rate,
-        
-        # System settings (from project_config)
-        max_seq_length=project_config['system']['max_seq_length'],
-        
-        # LoRA settings (from project_config)
-        use_lora=project_config['training']['use_lora'],
-        lora_r=project_config['lora']['r'],
-        lora_alpha=project_config['lora']['alpha'],
-        lora_dropout=project_config['lora']['dropout'],
-        
-        # Loss function settings
-        temperature=0.02,                    
-        margin=0.0,                         
-        matryoshka_dims=[128, 256, 512, 1024],  
-        use_matryoshka=False,               # 暂时禁用，专注基础训练
-    )
-    
-    return training_config
-    """ 
-    train过程中config的加载和覆盖优先级: 
-    1. 命令行参数
-    2. project_config.yaml
-    3. train中的 hard code 部分 - 用于处理命令行没有相关参数的情况如data/train.jsonl
-    4. training_config.py 中默认值 - JinaTrainingConfig class 为所有para提供了default value
-    """
 
 def main():
     """Main training function"""
     args = parse_args()
     
-    # Load configuration
-    config = load_config()
+    # Load unified configuration
+    config = load_project_config()
     
-    # Create unified training configuration
-    training_config = create_training_config(config, args)
+    # Create training configuration from unified config + args
+    training_config = create_training_config_from_unified(config, args)
 
     # Pre-compute wandb_enabled so that it's always defined, even if an
     # exception is raised before the later assignment inside the try block.
     wandb_enabled = config.get('wandb', {}).get('enabled', True)
     
-    print("=== Jina Embeddings V4 Training ===")
-    print(f"Project root: {project_root}")
-    print(f"Base model path: {training_config.model_name_or_path}")
+    # Only print info from main process to avoid duplicate output in distributed training
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    if local_rank == 0:
+        print("=== Jina Embeddings V4 Training ===")
+        print(f"Project root: {project_root}")
+        print(f"Base model path: {training_config.model_name_or_path}")
     
     # path checking
     base_model_path = Path(training_config.model_name_or_path)
     if not base_model_path.exists():
-        print(f"❌ Base model path does not exist: {base_model_path}")
+        if local_rank == 0:
+            print(f"❌ Base model path does not exist: {base_model_path}")
         sys.exit(1)
     
     # Specify data paths for training and eval
@@ -170,13 +106,15 @@ def main():
 
     output_dir = Path(training_config.output_dir)
 
-    print(f"📊 Training data: {train_data_path}")
-    print(f"📈 Training config: {training_config.num_train_epochs} epochs, batch_size={training_config.per_device_train_batch_size}, lr={training_config.learning_rate}")
-    print(f"💾 Output directory: {output_dir}")
+    if local_rank == 0:
+        print(f"📊 Training data: {train_data_path}")
+        print(f"📈 Training config: {training_config.num_train_epochs} epochs, batch_size={training_config.per_device_train_batch_size}, lr={training_config.learning_rate}")
+        print(f"💾 Output directory: {output_dir}")
 
     # Check training data exists
     if not Path(train_data_path).exists():
-        print(f"❌ Training data not found: {train_data_path}")
+        if local_rank == 0:
+            print(f"❌ Training data not found: {train_data_path}")
         sys.exit(1)
 
     # pack all configs related to data loading into data_config
@@ -213,6 +151,11 @@ def main():
         # model = AutoModel.from_pretrained("jinaai/jina-embeddings-v4", trust_remote_code=True, torch_dtype=torch.float16)
         # model = AutoModel.from_pretrained(str(base_model_path), trust_remote_code=True)
         model = JinaEmbeddingsV4Model.from_pretrained(str(base_model_path))
+        
+        # Move model to GPU immediately after loading to fix Flash Attention warning
+        if torch.cuda.is_available():
+            model = model.to('cuda')
+        
         # import pdb; pdb.set_trace()
         # Setup model for training
         # if training_config.use_lora:
@@ -243,12 +186,14 @@ def main():
             for peft_config in model.peft_config.values():
                 peft_config.inference_mode = False
         
-        logger.info(f"🔧 Force enabled {lora_params_enabled} LoRA parameters")
+        if local_rank == 0:
+            logger.info(f"🔧 Force enabled {lora_params_enabled} LoRA parameters")
         
         # Count trainable parameters
         trainable_count = sum(1 for p in model.parameters() if p.requires_grad)
         total_params = sum(1 for p in model.parameters())
-        logger.info(f"Total trainable parameters: {trainable_count} / {total_params}")
+        if local_rank == 0:
+            logger.info(f"Total trainable parameters: {trainable_count} / {total_params}")
         
         eval_dataset = None
         
@@ -316,7 +261,7 @@ def main():
                     "margin": float(training_config.margin),
                 },
             )
-        else:
+        elif local_rank == 0:
             print("ℹ️ Wandb logging disabled in configuration")
 
         # Initialize trainer with both TrainingArguments and JinaTrainingConfig
@@ -331,7 +276,8 @@ def main():
         )
         
         # Start training
-        logger.info("Starting training...")
+        if local_rank == 0:
+            logger.info("Starting training...")
         trainer.train()
         
         # Save final model
@@ -341,19 +287,22 @@ def main():
         if world_size == 1 or rank == 0:
             train_dataloader.dataset.processor.save_pretrained(str(output_dir))
         
-        print("🎉 Training completed successfully!")
-        print(f"📁 Model saved to: {output_dir}")
+        if local_rank == 0:
+            print("🎉 Training completed successfully!")
+            print(f"📁 Model saved to: {output_dir}")
         if wandb_enabled and (world_size == 1 or rank == 0):
             try:
                 wandb.finish()
-                print("📊 Wandb tracking finalized")
+                if local_rank == 0:
+                    print("📊 Wandb tracking finalized")
             except Exception:
                 pass
         
     except Exception as e:
         import traceback
         logger.exception("Training failed:")  # logs full traceback
-        print("❌ Training failed – see traceback above.")
+        if local_rank == 0:
+            print("❌ Training failed – see traceback above.")
         traceback.print_exc()
         if wandb_enabled and (int(os.environ.get("WORLD_SIZE", "1")) == 1 or int(os.environ.get("RANK", "0")) == 0):
             try:

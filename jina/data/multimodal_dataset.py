@@ -19,7 +19,7 @@ import numpy as np
 
 # Import Jina components (avoid hardcoded user paths)
 from jina.models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4Processor
-from jina.utils.local_paths import get_path  # new utility to fetch local paths
+from jina.utils.config_manager import load_config  # unified config system
 
 
 logger = logging.getLogger(__name__)
@@ -354,7 +354,7 @@ def load_processor_and_freeze(model_path: str) -> JinaEmbeddingsV4Processor:
         Loaded and frozen processor
     """
     # Load processor and model
-    processor = JinaEmbeddingsV4Processor.from_pretrained(model_path, trust_remote_code=True)
+    processor = JinaEmbeddingsV4Processor.from_pretrained(model_path, trust_remote_code=True, use_fast=True)
     # model = JinaEmbeddingsV4Model.from_pretrained(model_path, trust_remote_code=True)
     
     # # Freeze all parameters
@@ -391,10 +391,15 @@ def get_training_dataloader(
     Returns:
         Configured DataLoader
     """
-    # Resolve model path: explicit argument > local_paths.yaml > fallback relative path
+    # Resolve model path: explicit argument > unified config > fallback relative path
     if model_path is None:
-        model_path = get_path("base_model_path") or Path(__file__).resolve().parents[2] / "jina-embeddings-v4-base"
-        model_path = str(model_path)
+        config = load_config()
+        model_path = config.get('model', {}).get('base_model_path')
+        
+        
+        if not model_path:
+            model_path = str(Path(__file__).resolve().parents[2] / "jina-embeddings-v4-base")
+        
         logger.info(f"Using model path: {model_path}")
 
     # Load processor

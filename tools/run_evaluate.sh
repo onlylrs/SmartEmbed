@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Load evaluation configuration from unified config
+eval $(python tools/get_config.py --section evaluation)
+eval $(python tools/get_config.py --section runtime)
+
 # User-configurable settings
-RUN_MODE="distributed"   # "single" or "distributed"
-GPUS="0,1,2,3,4,5,6,7"            # e.g., "0" or "0,1,2,4"; for single, first id is used
+RUN_MODE="${DEFAULT_RUN_MODE:-distributed}"   # "single" or "distributed"
+GPUS="${DEFAULT_GPUS:-0,1,2,3}"            # e.g., "0" or "0,1,2,4"; for single, first id is used
 NUM_PROC=""               # optional override; if empty, derived from number of GPUS
 
-DATA_JSONL="/project/fyp25_hc2/data/eval0.jsonl"
-MODEL_PATH="/project/fyp25_hc2/jina-embeddings-v4"
-BASE_MODEL_PATH="/project/fyp25_hc2/jina-embeddings-v4"
-BATCH_SIZE=4
-DEVICE="cuda"
+DATA_JSONL="${EVAL_DATA:-/project/fyp25_hc2/data/eval0.jsonl}"
+MODEL_PATH="${EVAL_MODEL_PATH:-/project/fyp25_hc2/jina-embeddings-v4}"
+BASE_MODEL_PATH="${EVAL_BASE_MODEL_PATH:-/project/fyp25_hc2/jina-embeddings-v4}"
+BATCH_SIZE="${EVAL_BATCH_SIZE:-4}"
+DEVICE="${EVAL_DEVICE:-cuda}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"  # expected to be SmartEmbed
