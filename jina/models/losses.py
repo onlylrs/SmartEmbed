@@ -28,9 +28,15 @@ class JinaPairTraining(nn.Module):
     def __init__(
         self,
         temperature: float = 0.02,
+        w1_single: float = 1.0,
+        w2_multi: float = 1.0,
+        w3_kl: float = 1.0,
     ):
         super().__init__()
         self.temperature = temperature
+        self.w1_single = w1_single
+        self.w2_multi = w2_multi
+        self.w3_kl = w3_kl
         
     def _is_dist_initialized(self) -> bool:
         return dist.is_available() and dist.is_initialized()
@@ -233,9 +239,9 @@ class JinaPairTraining(nn.Module):
         Compute the joint loss with KL divergence term.
         
         Following the Jina paper, the joint loss function is:
-        L_joint = L_NCE(S_dense) + L_NCE(S_late) + L_D(KL_divergence)
+        L_joint = w1 * L_NCE(S_dense) + w2 * L_NCE(S_late) + w3 * L_D(KL_divergence)
         
-        Currently using equal weights (w1 = w2 = w3 = 1) for all three components.
+        Loss weights are configurable through system_config.yaml and user_config.yaml.
         
         Returns total loss and individual loss components
         """
@@ -250,13 +256,24 @@ class JinaPairTraining(nn.Module):
             query_single, pos_single, query_multi, pos_multi, q_mask, p_mask
         )
         
-        # Joint loss with equal weights (as requested)
-        total_loss = single_loss + multi_loss + kl_loss
+        # Apply configurable weights to each loss component
+        weighted_single_loss = self.w1_single * single_loss
+        weighted_multi_loss = self.w2_multi * multi_loss
+        weighted_kl_loss = self.w3_kl * kl_loss
+        
+        # Joint loss with configurable weights
+        total_loss = weighted_single_loss + weighted_multi_loss + weighted_kl_loss
         
         loss_dict = {
             "loss_single": single_loss,
             "loss_multi": multi_loss,
-            "loss_kl": kl_loss
+            "loss_kl": kl_loss,
+            "loss_single_weighted": weighted_single_loss,
+            "loss_multi_weighted": weighted_multi_loss,
+            "loss_kl_weighted": weighted_kl_loss,
+            "w1_single": self.w1_single,
+            "w2_multi": self.w2_multi,
+            "w3_kl": self.w3_kl
         }
         
         return total_loss, loss_dict

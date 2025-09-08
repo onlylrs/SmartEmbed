@@ -50,9 +50,12 @@ class JinaEmbeddingTrainer(Trainer):
     ):
         self.training_config = training_config
         
-        # Set up loss functions
+        # Set up loss functions with configurable weights
         self.pair_training_loss = JinaPairTraining(
             temperature=training_config.temperature,
+            w1_single=getattr(training_config, 'w1_single', 1.0),
+            w2_multi=getattr(training_config, 'w2_multi', 1.0),
+            w3_kl=getattr(training_config, 'w3_kl', 1.0),
         )
         
         # Note: Multi-task and Matryoshka losses are placeholders for future implementation

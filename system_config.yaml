@@ -103,6 +103,11 @@ loss:
   use_simplified_contrastive: true        # Use simplified contrastive loss
   negative_sampling_strategy: "random"    # Strategy for negative sampling
   num_negatives: 7                        # Number of negative samples
+  
+  # Phase 1 Loss Weights (Pair Training)
+  w1_single: 1.0                          # Weight for single-vector InfoNCE loss
+  w2_multi: 1.0                           # Weight for multi-vector InfoNCE loss  
+  w3_kl: 1.0                              # Weight for KL divergence loss
 
 # System and Hardware Configuration
 system:
