@@ -29,8 +29,8 @@ training:
   
   # Training hyperparameters
   num_train_epochs: 30                    # Number of training epochs
-  per_device_train_batch_size: 16         # Training batch size per device
-  per_device_eval_batch_size: 8           # Evaluation batch size per device
+  per_device_train_batch_size: 8          # Training batch size per device (8*4=32 total)
+  per_device_eval_batch_size: 4           # Evaluation batch size per device
   gradient_accumulation_steps: 1          # Steps to accumulate gradients
   learning_rate: 1e-4                     # Initial learning rate
   weight_decay: 0.01                      # Weight decay for regularization
@@ -126,13 +126,13 @@ system:
 runtime:
   # Default hardware settings
   default_run_mode: "distributed"         # Default training mode
-  default_gpus: "0,1"                     # Default GPU allocation (2 GPUs)
-  default_num_proc: 2                     # Default number of processes
+  default_gpus: "0,1,2,3"                 # Default GPU allocation (4 GPUs)
+  default_num_proc: 4                     # Default number of processes
   
   # SLURM-specific configuration
   slurm_run_mode: "distributed"           # Training mode for SLURM jobs
-  slurm_gpus: "0,1"                       # GPU allocation for SLURM (2 GPUs)
-  slurm_num_proc: 2                       # Number of processes for SLURM
+  slurm_gpus: "0,1,2,3"                   # GPU allocation for SLURM (4 GPUs)
+  slurm_num_proc: 4                       # Number of processes for SLURM
   
   # SLURM job configuration
   slurm_partition: "medimgfmod"           # SLURM partition name
