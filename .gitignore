@@ -43,14 +43,6 @@ videos/
 *.pickle
 *.safetensors
 
-# Training outputs (our new structure)
-/outputs/models/*
-/outputs/logs/*
-/outputs/results/*
-!outputs/models/.gitkeep
-!outputs/logs/.gitkeep
-!outputs/results/.gitkeep
-
 # Training artifacts
 checkpoints/
 runs/

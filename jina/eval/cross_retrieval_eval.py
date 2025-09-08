@@ -420,7 +420,7 @@ def main():
     parser.add_argument("--base_model_path", type=str, default=get_base_model_path(), help="Path to full base model (needed when --model_path only contains LoRA adapters)")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--save_dir", type=str, default=str(_project_root() / "outputs" / "eval"))
+    parser.add_argument("--save_dir", type=str, default=str(_project_root() / "output" / "eval"))
     args = parser.parse_args()
 
     if not args.data_jsonl or not os.path.exists(args.data_jsonl):
