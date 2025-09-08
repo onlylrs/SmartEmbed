@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 
 #SBATCH --job-name=jina
-#SBATCH --partition=medimgfmod
+#SBATCH --partition=normal
 #SBATCH --account=medimgfmod
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=28
-#SBATCH --time=96:00:00
-#SBATCH --output=%x-%j.out
-#SBATCH --error=%x-%j.err
+#SBATCH --time=36:00:00
+#SBATCH --output=outputs/logs/%x-%j.out
+#SBATCH --error=outputs/logs/%x-%j.err
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=fredliam99@hotmail.com
 
