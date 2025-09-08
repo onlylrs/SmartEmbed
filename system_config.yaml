@@ -52,7 +52,7 @@ training:
   logging_strategy: "steps"               # When to log metrics
   logging_steps: 10                       # Steps between logging
   save_strategy: "steps"                  # When to save checkpoints
-  save_steps: 500                            # Steps between checkpoint saves # DEBUG: can be changed to 1 for frequent saving
+  save_steps: 10                            # Steps between checkpoint saves # DEBUG: can be changed to 1 for frequent saving
   save_total_limit: 2                     # Maximum number of checkpoints to keep
   
   # LoRA Configuration

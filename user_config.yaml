@@ -3,7 +3,7 @@
 
 # Model path for shebd's environment
 model:
-  base_model_path: "/home/shebd/4_Collaboration/FYP2526/jina-embeddings-v4"
+  base_model_path: "/project/medimgfmod/Generalist/0_Pretrained/jina-embeddings-v4"
 
 # Data paths for shebd's environment  
 data:
@@ -12,9 +12,10 @@ data:
 
 # Training configuration for current experiments
 training:
-  output_dir: "/home/shebd/4_Collaboration/FYP2526/output/models"
+  output_dir: "/home/shebd/4_Collaboration/FYP2526/output/models/run_9.7_liam"
 
 # Evaluation paths for shebd's environment
 evaluation:
-  eval_data_jsonl: "/home/shebd/4_Collaboration/FYP2526/data/eval.jsonl"
-  eval_base_model_path: "/home/shebd/4_Collaboration/FYP2526/jina-embeddings-v4"
+  eval_data_jsonl: "/home/shebd/4_Collaboration/FYP2526/data/eval_full_path.jsonl"
+  eval_model_path: "/home/shebd/4_Collaboration/FYP2526/output/models/run_9.7_fred/checkpoint-2500"
+  eval_base_model_path: "/project/medimgfmod/Generalist/0_Pretrained/jina-embeddings-v4"

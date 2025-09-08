@@ -9,7 +9,7 @@ from datetime import datetime
 from io import StringIO
 from pathlib import Path
 from typing import Dict, List, Tuple
-
+from safetensors import safe_open
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -318,20 +318,28 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
                         )
                     if not base_model_path:
                         raise ValueError("base_model_path must be provided when using LoRA/PEFT adapters")
+                    # The key insight: base model is already a PeftModel with official adapters.
+                    # We need to load our checkpoint adapters to replace/update the weights.
+                    # The simplest approach is to load the base model, then directly load our adapter state dict.
                     base = JinaEmbeddingsV4Model.from_pretrained(base_model_path, trust_remote_code=True).to(device)
-                    # If base already comes as a PeftModel (it will, per Jina's implementation),
-                    # load our adapter into it and activate explicitly. Otherwise, wrap with PEFT.
-                    if isinstance(base, PeftModel):
-                        adapter_name = "eval_adapter"
-                        base.load_adapter(adapter_dir, adapter_name=adapter_name)
-                        base.set_adapter(adapter_name)
-                        model = base
-                    else:
-                        lora_cfg = None
-                        cfg_path = os.path.join(adapter_dir, "adapter_config.json")
-                        if os.path.isfile(cfg_path):
-                            lora_cfg = LoraConfig.from_pretrained(adapter_dir)
-                        model = PeftModel.from_pretrained(base, adapter_dir, config=lora_cfg).to(device)
+                    
+                    # Load adapter weights
+                    with safe_open(os.path.join(adapter_dir, "adapter_model.safetensors"), framework="pt") as f:
+                        adapter_state_dict = {k: f.get_tensor(k) for k in f.keys()}
+                    
+                    # The base model has 'default' adapter, but our checkpoint has task-specific adapters
+                    # We need to map our 'retrieval' adapter weights to the base model's 'default' adapter
+                    
+                    # Filter to only 'retrieval' task weights from our checkpoint
+                    retrieval_state_dict = {}
+                    for key, weight in adapter_state_dict.items():
+                        if '.retrieval.' in key:
+                            # Map retrieval weights to default adapter
+                            new_key = key.replace('.retrieval.', '.default.')
+                            retrieval_state_dict[new_key] = weight
+                    
+                    # The base model should already have 'default' as active adapter
+                    model = base
                 model.task = "retrieval"
         finally:
             # Restore original logging levels
@@ -352,6 +360,11 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
                 f"Model loaded successfully! name_or_path={name_or_path}, peft={is_peft}, "
                 f"active_adapter={active_adapter}, adapters={available_adapters}"
             )
+
+    except Exception as e:
+        if rank == 0:
+            print(f"Error loading model: {e}")
+        raise
 
     images, texts, img_to_text_idxs, text_to_img_idx = load_eval_data(jsonl_path)
     if len(images) == 0 or len(texts) == 0:
