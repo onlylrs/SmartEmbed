@@ -137,11 +137,16 @@ def load_eval_data(jsonl_path: str) -> Tuple[List[str], List[str], Dict[int, set
             img_to_text_idxs (Dict[int, set]): Mapping from image index to a set of text indices associated with that image.
             text_to_img_idx (List[int]): List mapping each text index to its corresponding image index.
     """
+    from PIL import Image
+    
     images: List[str] = []
     texts: List[str] = []
     img_index: Dict[str, int] = {}
     img_to_text_idxs: Dict[int, set] = defaultdict(set)
     text_to_img_idx: List[int] = []
+    
+    skipped_images = 0
+    min_size = 28  # Minimum size required by Qwen2VL processor
 
     with open(jsonl_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -152,6 +157,23 @@ def load_eval_data(jsonl_path: str) -> Tuple[List[str], List[str], Dict[int, set
             txt = item.get("positive") or item.get("text")
             if not img_path or not txt:
                 continue
+                
+            # Check image size before including it
+            try:
+                if os.path.exists(img_path):
+                    with Image.open(img_path) as img:
+                        width, height = img.size
+                        if height < min_size or width < min_size:
+                            skipped_images += 1
+                            print(f"Skipping image {img_path}: size {width}x{height} too small (min {min_size})")
+                            continue
+                else:
+                    print(f"Skipping missing image: {img_path}")
+                    continue
+            except Exception as e:
+                print(f"Error checking image {img_path}: {e}")
+                continue
+                
             if img_path not in img_index:
                 img_index[img_path] = len(images)
                 images.append(img_path)
@@ -160,6 +182,9 @@ def load_eval_data(jsonl_path: str) -> Tuple[List[str], List[str], Dict[int, set
             t = len(texts) - 1
             img_to_text_idxs[i].add(t)
             text_to_img_idx.append(i)
+    
+    if skipped_images > 0:
+        print(f"Skipped {skipped_images} images due to size constraints")
 
     return images, texts, img_to_text_idxs, text_to_img_idx
 
@@ -334,9 +359,16 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
                     retrieval_state_dict = {}
                     for key, weight in adapter_state_dict.items():
                         if '.retrieval.' in key:
-                            # Map retrieval weights to default adapter
-                            new_key = key.replace('.retrieval.', '.default.')
+                            # Map retrieval weights to default.retrieval path in base model
+                            new_key = key.replace('.retrieval.', '.default.retrieval.')
                             retrieval_state_dict[new_key] = weight
+                    
+                    # Load only the retrieval adapter weights into the default adapter
+                    missing, unexpected = base.load_state_dict(retrieval_state_dict, strict=False)
+                    if rank == 0:
+                        print(f"Loaded {len(retrieval_state_dict)} retrieval adapter weights into default adapter")
+                        if unexpected:  
+                            print(f"Unexpected keys: {len(unexpected)}")
                     
                     # The base model should already have 'default' as active adapter
                     model = base

@@ -6,13 +6,13 @@ eval $(python tools/get_config.py --section evaluation)
 eval $(python tools/get_config.py --section runtime)
 
 # Use configuration from unified config system
-RUN_MODE="${DEFAULT_RUN_MODE:-distributed}"   # "single" or "distributed"
+RUN_MODE="${DEFAULT_RUN_MODE:-single}"   # "single" or "distributed"
 GPUS="${DEFAULT_GPUS:-0,1,2,3}"            # e.g., "0" or "0,1,2,4"; for single, first id is used
 NUM_PROC=""               # optional override; if empty, derived from number of GPUS
 
 # Use config values directly, with fallbacks for compatibility
 DATA_JSONL="${EVAL_DATA_JSONL:-/home/shebd/4_Collaboration/FYP2526/data/eval_full_path.jsonl}"
-MODEL_PATH="${EVAL_MODEL_PATH:-/home/shebd/4_Collaboration/FYP2526/output/models/run_9.7_fred/checkpoint-2500}"
+MODEL_PATH="${EVAL_MODEL_PATH:-/home/shebd/4_Collaboration/FYP2526/output/models/run_9.7_fred/checkpoint-15000}"
 BASE_MODEL_PATH="${EVAL_BASE_MODEL_PATH:-/project/medimgfmod/Generalist/0_Pretrained/jina-embeddings-v4}"
 BATCH_SIZE="${EVAL_BATCH_SIZE:-16}"
 DEVICE="${EVAL_DEVICE:-cuda}"
