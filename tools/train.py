@@ -65,18 +65,12 @@ def parse_args():
     
     return parser.parse_args()
 
-
-def load_project_config():
-    """Load configuration using unified config system"""
-    return load_config()
-
-
 def main():
     """Main training function"""
     args = parse_args()
     
     # Load unified configuration
-    config = load_project_config()
+    config = load_config()
     
     # Create training configuration from unified config + args
     training_config = create_training_config_from_unified(config, args)
@@ -213,7 +207,7 @@ def main():
             gradient_accumulation_steps=getattr(training_config, 'gradient_accumulation_steps', 1),
             warmup_steps=100,
             logging_steps=10,
-            save_steps=500,
+            save_steps=1,
             eval_steps=500 if eval_dataset else None,
             eval_strategy="steps" if eval_dataset else "no",  # Fixed back to correct parameter name
             save_strategy="steps",

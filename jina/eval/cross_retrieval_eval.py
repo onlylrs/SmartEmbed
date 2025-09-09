@@ -9,7 +9,7 @@ from datetime import datetime
 from io import StringIO
 from pathlib import Path
 from typing import Dict, List, Tuple
-
+from safetensors import safe_open
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -137,11 +137,16 @@ def load_eval_data(jsonl_path: str) -> Tuple[List[str], List[str], Dict[int, set
             img_to_text_idxs (Dict[int, set]): Mapping from image index to a set of text indices associated with that image.
             text_to_img_idx (List[int]): List mapping each text index to its corresponding image index.
     """
+    from PIL import Image
+    
     images: List[str] = []
     texts: List[str] = []
     img_index: Dict[str, int] = {}
     img_to_text_idxs: Dict[int, set] = defaultdict(set)
     text_to_img_idx: List[int] = []
+    
+    skipped_images = 0
+    min_size = 28  # Minimum size required by Qwen2VL processor
 
     with open(jsonl_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -152,6 +157,23 @@ def load_eval_data(jsonl_path: str) -> Tuple[List[str], List[str], Dict[int, set
             txt = item.get("positive") or item.get("text")
             if not img_path or not txt:
                 continue
+                
+            # Check image size before including it
+            try:
+                if os.path.exists(img_path):
+                    with Image.open(img_path) as img:
+                        width, height = img.size
+                        if height < min_size or width < min_size:
+                            skipped_images += 1
+                            print(f"Skipping image {img_path}: size {width}x{height} too small (min {min_size})")
+                            continue
+                else:
+                    print(f"Skipping missing image: {img_path}")
+                    continue
+            except Exception as e:
+                print(f"Error checking image {img_path}: {e}")
+                continue
+                
             if img_path not in img_index:
                 img_index[img_path] = len(images)
                 images.append(img_path)
@@ -160,6 +182,9 @@ def load_eval_data(jsonl_path: str) -> Tuple[List[str], List[str], Dict[int, set
             t = len(texts) - 1
             img_to_text_idxs[i].add(t)
             text_to_img_idx.append(i)
+    
+    if skipped_images > 0:
+        print(f"Skipped {skipped_images} images due to size constraints")
 
     return images, texts, img_to_text_idxs, text_to_img_idx
 
@@ -318,20 +343,35 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
                         )
                     if not base_model_path:
                         raise ValueError("base_model_path must be provided when using LoRA/PEFT adapters")
+                    # The key insight: base model is already a PeftModel with official adapters.
+                    # We need to load our checkpoint adapters to replace/update the weights.
+                    # The simplest approach is to load the base model, then directly load our adapter state dict.
                     base = JinaEmbeddingsV4Model.from_pretrained(base_model_path, trust_remote_code=True).to(device)
-                    # If base already comes as a PeftModel (it will, per Jina's implementation),
-                    # load our adapter into it and activate explicitly. Otherwise, wrap with PEFT.
-                    if isinstance(base, PeftModel):
-                        adapter_name = "eval_adapter"
-                        base.load_adapter(adapter_dir, adapter_name=adapter_name)
-                        base.set_adapter(adapter_name)
-                        model = base
-                    else:
-                        lora_cfg = None
-                        cfg_path = os.path.join(adapter_dir, "adapter_config.json")
-                        if os.path.isfile(cfg_path):
-                            lora_cfg = LoraConfig.from_pretrained(adapter_dir)
-                        model = PeftModel.from_pretrained(base, adapter_dir, config=lora_cfg).to(device)
+                    
+                    # Load adapter weights
+                    with safe_open(os.path.join(adapter_dir, "adapter_model.safetensors"), framework="pt") as f:
+                        adapter_state_dict = {k: f.get_tensor(k) for k in f.keys()}
+                    
+                    # The base model has 'default' adapter, but our checkpoint has task-specific adapters
+                    # We need to map our 'retrieval' adapter weights to the base model's 'default' adapter
+                    
+                    # Filter to only 'retrieval' task weights from our checkpoint
+                    retrieval_state_dict = {}
+                    for key, weight in adapter_state_dict.items():
+                        if '.retrieval.' in key:
+                            # Map retrieval weights to default.retrieval path in base model
+                            new_key = key.replace('.retrieval.', '.default.retrieval.')
+                            retrieval_state_dict[new_key] = weight
+                    
+                    # Load only the retrieval adapter weights into the default adapter
+                    missing, unexpected = base.load_state_dict(retrieval_state_dict, strict=False)
+                    if rank == 0:
+                        print(f"Loaded {len(retrieval_state_dict)} retrieval adapter weights into default adapter")
+                        if unexpected:  
+                            print(f"Unexpected keys: {len(unexpected)}")
+                    
+                    # The base model should already have 'default' as active adapter
+                    model = base
                 model.task = "retrieval"
         finally:
             # Restore original logging levels
@@ -352,6 +392,11 @@ def evaluate(model_path: str, base_model_path: str | None, jsonl_path: str, batc
                 f"Model loaded successfully! name_or_path={name_or_path}, peft={is_peft}, "
                 f"active_adapter={active_adapter}, adapters={available_adapters}"
             )
+
+    except Exception as e:
+        if rank == 0:
+            print(f"Error loading model: {e}")
+        raise
 
     images, texts, img_to_text_idxs, text_to_img_idx = load_eval_data(jsonl_path)
     if len(images) == 0 or len(texts) == 0:
@@ -407,7 +452,7 @@ def main():
     parser.add_argument("--base_model_path", type=str, default=get_base_model_path(), help="Path to full base model (needed when --model_path only contains LoRA adapters)")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--save_dir", type=str, default=str(_project_root() / "outputs" / "eval"))
+    parser.add_argument("--save_dir", type=str, default=str(_project_root() / "output" / "eval"))
     args = parser.parse_args()
 
     if not args.data_jsonl or not os.path.exists(args.data_jsonl):
