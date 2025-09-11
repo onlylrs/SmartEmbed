@@ -73,7 +73,7 @@ class JinaEmbeddingTrainer(Trainer):
         # Set label_names after initialization to fix "No label_names provided" warning
         # For retrieval tasks, we don't need traditional labels
         self.label_names = []
-    
+
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Compute the training loss using modular loss functions
@@ -93,31 +93,24 @@ class JinaEmbeddingTrainer(Trainer):
                 positive_inputs[key.replace('positive_', '')] = value
         
         # Extract task labels from batch data
-        if task_labels is not None and len(task_labels) > 0:
+        # if task_labels is not None and len(task_labels) > 0:
             # Use the first task label in the batch (assuming all items in batch have same task)
-            current_task_label = task_labels[0] if isinstance(task_labels, (list, tuple)) else task_labels
-        else:
+        #    current_task_label = task_labels[0] if isinstance(task_labels, (list, tuple)) else task_labels
+        #else:
             # Fallback to default task
-            current_task_label = "retrieval"
+        #    current_task_label = "retrieval"
+
+        current_task_label = "retrieval"  # Default task label for now
         
         # Forward pass for queries (image branch) and positives (text branch)
         query_outputs = model(task_label=current_task_label, **query_inputs)
         positive_outputs = model(task_label=current_task_label, **positive_inputs)
 
         # Extract single- and multi-vector embeddings
-        if isinstance(query_outputs, JinaEmbeddingsV4ModelOutput):
-            query_single = query_outputs.single_vec_emb
-            query_multi = query_outputs.multi_vec_emb
-        else:
-            query_single = query_outputs.get("single_vec_emb", None)
-            query_multi = query_outputs.get("multi_vec_emb", None)
-
-        if isinstance(positive_outputs, JinaEmbeddingsV4ModelOutput):
-            pos_single = positive_outputs.single_vec_emb
-            pos_multi = positive_outputs.multi_vec_emb
-        else:
-            pos_single = positive_outputs.get("single_vec_emb", None)
-            pos_multi = positive_outputs.get("multi_vec_emb", None)
+        query_single = query_outputs.single_vec_emb
+        query_multi = query_outputs.multi_vec_emb
+        pos_single = positive_outputs.single_vec_emb
+        pos_multi = positive_outputs.multi_vec_emb
 
         # Validate tensors
         if query_single is None or pos_single is None or query_multi is None or pos_multi is None:
@@ -135,15 +128,17 @@ class JinaEmbeddingTrainer(Trainer):
 
             # Get attention masks
             q_mask = query_inputs.get("attention_mask")
-            if q_mask is None:
-                q_mask = query_inputs.get("query_attention_mask")
+            # if q_mask is None:
+            #    print("000000000000000")
+            #    print("Debug: query_inputs type:", type(query_inputs))
+            #    q_mask = query_inputs.get("query_attention_mask")
             p_mask = positive_inputs.get("attention_mask")
-            if p_mask is None:
-                p_mask = positive_inputs.get("positive_attention_mask")
-            if q_mask is None or p_mask is None:
-                # Fallback: infer mask from non-zero rows
-                q_mask = (query_multi.abs().sum(dim=-1) > 0).to(query_multi.dtype)
-                p_mask = (pos_multi.abs().sum(dim=-1) > 0).to(pos_multi.dtype)
+            #if p_mask is None:
+            #    p_mask = positive_inputs.get("positive_attention_mask")
+            #if q_mask is None or p_mask is None:
+            #    # Fallback: infer mask from non-zero rows
+            #    q_mask = (query_multi.abs().sum(dim=-1) > 0).to(query_multi.dtype)
+            #    p_mask = (pos_multi.abs().sum(dim=-1) > 0).to(pos_multi.dtype)
 
             # Use Phase 1 Pair Training loss function
             loss, loss_dict = self.pair_training_loss(
