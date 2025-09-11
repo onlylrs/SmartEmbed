@@ -7,23 +7,15 @@ import json
 import logging
 import torch
 import torch.nn as nn
-import torch.distributed as dist
 from typing import Dict, List, Optional, Union, Tuple, Any
-from dataclasses import dataclass
 
 from transformers import (
     Trainer,
-    TrainingArguments,
-    EvalPrediction,
     PreTrainedModel,
     PreTrainedTokenizer,
 )
-from transformers.trainer_utils import PredictionOutput
-from peft import LoraConfig, get_peft_model, TaskType
 
-from ..models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4Model, JinaEmbeddingsV4ModelOutput
-from ..models.custom_lora_module import MultiAdapterLinear
-from ..models.configuration_jina_embeddings_v4 import JinaEmbeddingsV4Config
+from ..models.modeling_jina_embeddings_v4 import JinaEmbeddingsV4ModelOutput
 from ..models.losses import JinaPairTraining, JinaMultiTaskLoss, JinaMatryoshkaLoss
 from ..training.config_schema import JinaTrainingConfig
 from ..data.data_collator import JinaContrastiveDataCollator
@@ -44,7 +36,6 @@ class JinaEmbeddingTrainer(Trainer):
         self,
         model: Union[PreTrainedModel, nn.Module] = None,
         training_config: JinaTrainingConfig = None,
-        training_args: TrainingArguments = None,
         tokenizer: PreTrainedTokenizer = None,
         **kwargs
     ):
@@ -74,7 +65,7 @@ class JinaEmbeddingTrainer(Trainer):
         # Fix for newer transformers versions
         super().__init__(
             model=model,
-            args=training_args,
+            args=training_config,
             processing_class=tokenizer,  # Use processing_class instead of tokenizer
             **kwargs
         )
@@ -165,7 +156,10 @@ class JinaEmbeddingTrainer(Trainer):
             )
             
             # Convert loss tensors to float for logging
-            loss_dict = {k: float(v.detach().item()) for k, v in loss_dict.items()}
+            loss_dict = {
+                k: float(v.detach().item()) if hasattr(v, 'detach') else float(v) 
+                for k, v in loss_dict.items()
+            }
         
         # Log losses
         if self.args.logging_steps > 0 and self.state.global_step % self.args.logging_steps == 0:
@@ -341,178 +335,11 @@ class JinaEmbeddingTrainer(Trainer):
             
         # Save training config
         if self.training_config is not None:
-            config_dict = self.training_config.__dict__.copy()
+            config_dict = self.training_config.to_dict()
             with open(os.path.join(output_dir, "training_config.json"), "w") as f:
                 json.dump(config_dict, f, indent=2)
                 
         logger.info(f"Model saved to {output_dir}")
-
-
-def setup_model_for_training(
-    model_or_path,
-    use_lora: bool = True,
-    lora_r: int = 16,
-    lora_alpha: int = 16,
-    lora_dropout: float = 0.1,
-    task_names: List[str] = None,
-    adapter_name: str = "retrieval",
-    enable_visual_lora: bool = False,
-) -> JinaEmbeddingsV4Model:
-    """
-    Simplified setup function for model training with LoRA adapters
-    Compatible with train.py calling convention
-    """
-    
-    # If a model is passed, use it; otherwise load from path
-    if isinstance(model_or_path, str):
-        model = JinaEmbeddingsV4Model.from_pretrained(
-            model_or_path,
-            torch_dtype="auto",
-            trust_remote_code=True,
-        )
-    else:
-        model = model_or_path
-    
-    if use_lora:
-        # NOTE: enable_visual_lora is currently a no-op here.  The visual tower in the base
-        # Jina Embeddings V4 model is already frozen for memory reasons.  We accept the
-        # argument so that higher-level callers (tools/train.py) can pass it without
-        # breaking, but we intentionally do not inject LoRA layers into the vision
-        # transformer at this stage.  This avoids changing call signatures that would
-        # require passing task_label through the vision path.  Support can be added
-        # later by matching visual.* linears and applying the same MultiAdapterLinear
-        # mechanism.
-
-        # If the model already has PEFT, it was likely loaded by JinaEmbeddingsV4Model.from_pretrained,
-        # which does not apply the custom MultiAdapterLinear module. We need to unwrap it and re-apply
-        # PEFT with the correct configuration.
-        if hasattr(model, 'peft_config') and hasattr(model, 'model'):
-            model = model.model  # Unwrap the base model from PeftModel
-
-        # Now, apply PEFT with the custom MultiAdapterLinear module
-        if use_lora:
-            if task_names is None:
-                task_names = ["retrieval", "text-matching", "code"]
-            target_regex = r"(.*(model).*(down_proj|gate_proj|up_proj|k_proj|q_proj|v_proj|o_proj).*$|.*(single_vector_projector|multi_vector_projector).*$)"
-            # target_regex = r".*(model\.layers\.\d+\.mlp\.(down_proj|gate_proj|up_proj)|model\.layers\.\d+\.self_attn\.(k_proj|q_proj|v_proj|o_proj)).*$|.*(single_vector_projector|multi_vector_projector).*$"
-            lora_config = LoraConfig(
-                task_type=TaskType.FEATURE_EXTRACTION,
-                r=lora_r,
-                lora_alpha=lora_alpha,
-                lora_dropout=lora_dropout,
-                target_modules=target_regex,
-                modules_to_save=None,
-                inference_mode=False,
-            )
-            from torch.nn.modules.linear import Linear
-            from functools import partial
-            lora_config._custom_modules = {  # type: ignore[attr-defined]
-                Linear: partial(MultiAdapterLinear, task_names=task_names)
-            }
-            model = get_peft_model(model, lora_config)
-            try:
-                model.set_adapter(adapter_name)
-            except Exception:
-                pass
-            for cfg in getattr(model, 'peft_config', {}).values():
-                if hasattr(cfg, 'inference_mode'):
-                    cfg.inference_mode = False
-            for name, param in model.named_parameters():
-                if ('lora_' in name) or ('multi_vector_projector' in name) or ('single_vector_projector' in name):
-                    param.requires_grad = True
-            # Make sure all LoRA layers are in unmerged (training) state
-            from peft.tuners.lora import LoraLayer as _LL
-            for mod in model.modules():
-                if isinstance(mod, _LL) and getattr(mod, 'merged', False):
-                    try:
-                        mod.unmerge()
-                    except Exception:
-                        pass
-                if isinstance(mod, _LL):
-                    try:
-                        mod.disable_adapters = False
-                    except AttributeError:
-                        logger.warning(f"Could not set disable_adapters=False on {type(mod).__name__}, assuming it's active.")
-                        pass
-            logger.info("LoRA adapters added per official adapter_config targeting; decoder LoRA active and projector trainable")
-    
-    return model
-
-
-def setup_model_for_training_legacy(
-    training_config: JinaTrainingConfig,
-    tokenizer: Optional[PreTrainedTokenizer] = None,
-) -> JinaEmbeddingsV4Model:
-    """
-    Set up the model for training with LoRA adapters
-    """
-    
-    # Load base model
-    model = JinaEmbeddingsV4Model.from_pretrained(
-        training_config.model_name_or_path,
-        torch_dtype=getattr(torch, training_config.torch_dtype) if training_config.torch_dtype != "auto" else "auto",
-        trust_remote_code=training_config.trust_remote_code,
-    )
-    
-    if training_config.use_lora:
-        # Check if model is already a PEFT model (from pretrained Jina model)
-        if hasattr(model, 'peft_config'):
-            logger.info("Model is already a PEFT model, updating PEFT configuration for training")
-            
-            # Force enable training mode and disable inference mode
-            model.train()
-            
-            # Critical: Enable all LoRA parameters for training
-            for name, param in model.named_parameters():
-                if 'lora_' in name or 'adapters' in name:
-                    param.requires_grad = True
-                    logger.info(f"Enabled gradients for LoRA parameter: {name}")
-            
-            # Also make sure PEFT config is set to training mode
-            for peft_config in model.peft_config.values():
-                peft_config.inference_mode = False
-                logger.info(f"Set PEFT config inference_mode=False for training")
-        else:
-            # Configure LoRA with corrected target modules
-            lora_config = LoraConfig(
-                task_type=TaskType.FEATURE_EXTRACTION,
-                r=training_config.lora_r,
-                lora_alpha=training_config.lora_alpha,
-                lora_dropout=training_config.lora_dropout,
-                target_modules=[
-                    # Core Qwen attention and MLP layers
-                    "q_proj", "k_proj", "v_proj", "o_proj",  # attention
-                    "gate_proj", "up_proj", "down_proj",     # MLP
-                    # Jina-specific projection layers
-                    "multi_vector_projector",
-                ],
-                bias=training_config.lora_bias,
-                inference_mode=False,  # Explicitly set to False for training
-            )
-            
-            # Apply LoRA to model
-            model = get_peft_model(model, lora_config)
-        
-        # Ensure projection layers are trainable even if not in LoRA targets
-        for name, param in model.named_parameters():
-            if "projector" in name and not param.requires_grad:
-                param.requires_grad = True
-                logger.info(f"Force enabled gradients for projection layer: {name}")
-        
-        logger.info("LoRA adapters added to model")
-        
-        # Print trainable parameter details
-        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        total_params = sum(p.numel() for p in model.parameters())
-        logger.info(f"Trainable parameters: {trainable_params:,} / {total_params:,} ({100 * trainable_params / total_params:.2f}%)")
-        
-        # # Log which parameters are trainable
-        # logger.info("Trainable parameters:")
-        # for name, param in model.named_parameters():
-        #     if param.requires_grad:
-        #         logger.info(f"  {name}: {param.shape}")
-    
-    return model
 
 
 def nested_detach(tensors):

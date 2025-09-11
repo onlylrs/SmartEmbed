@@ -12,7 +12,11 @@ data:
 
 # Training configuration for current experiments
 training:
-  output_dir: "/home/shebd/4_Collaboration/FYP2526/output/models/run_9.7_liam"
+  output_dir: "/home/shebd/4_Collaboration/FYP2526/output/models/run_9.10_fred"
+  per_device_train_batch_size: 16        
+  save_steps: 500                        
+  save_total_limit: 3
+  num_train_epochs: 10                    
 
 # Loss weights configuration (currently equal weights)
 loss:
@@ -23,5 +27,5 @@ loss:
 # Evaluation paths for shebd's environment
 evaluation:
   eval_data_jsonl: "/home/shebd/4_Collaboration/FYP2526/data/eval_full_path.jsonl"
-  eval_model_path: "/home/shebd/4_Collaboration/FYP2526/output/models/run_9.7_fred/checkpoint-2500"
+  eval_model_path: "/home/shebd/4_Collaboration/FYP2526/output/models/run_9.9_fred/checkpoint-2500"
   eval_base_model_path: "/project/medimgfmod/Generalist/0_Pretrained/jina-embeddings-v4"

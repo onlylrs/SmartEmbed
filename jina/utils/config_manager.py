@@ -14,12 +14,11 @@ Usage:
     batch_size = config['training']['per_device_train_batch_size']
 """
 
-import os
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
 import copy
-
+from ..training.config_schema import JinaTrainingConfig
 
 def deep_merge(base_dict: Dict[Any, Any], override_dict: Dict[Any, Any]) -> Dict[Any, Any]:
     """
@@ -88,28 +87,7 @@ def load_config(project_root: Optional[Path] = None) -> Dict[str, Any]:
     return config
 
 
-def get_model_path(config: Dict[str, Any]) -> str:
-    """
-    Get the model path from unified configuration.
-    
-    Args:
-        config: Configuration dictionary from load_config()
-        
-    Returns:
-        Model path string
-        
-    Raises:
-        ValueError: If no model path found in configuration
-    """
-    model_path = config.get('model', {}).get('base_model_path')
-    
-    if not model_path:
-        raise ValueError("No model path found in configuration. Please set model.base_model_path in user_config.yaml")
-    
-    return model_path
-
-
-def create_training_config_from_unified(config: Dict[str, Any], args: Any = None) -> 'JinaTrainingConfig':
+def create_training_config_from_unified(config: Dict[str, Any], args: Any = None) -> JinaTrainingConfig:
     """
     Create JinaTrainingConfig object from unified configuration.
     
@@ -120,7 +98,6 @@ def create_training_config_from_unified(config: Dict[str, Any], args: Any = None
     Returns:
         JinaTrainingConfig object
     """
-    from ..training.config_schema import JinaTrainingConfig
     
     # Handle command line overrides
     if args:
@@ -137,7 +114,8 @@ def create_training_config_from_unified(config: Dict[str, Any], args: Any = None
     # Create JinaTrainingConfig with all parameters from unified config
     training_config = JinaTrainingConfig(
         # Model settings
-        model_name_or_path=get_model_path(config),
+        model_name_or_path=config['model']['base_model_path'],
+        base_model_path=config['model']['base_model_path'],
         model_revision=config['model']['model_revision'],
         torch_dtype=config['model']['torch_dtype'],
         trust_remote_code=config['model']['trust_remote_code'],
@@ -178,6 +156,11 @@ def create_training_config_from_unified(config: Dict[str, Any], args: Any = None
         dataloader_pin_memory=config['data']['dataloader_pin_memory'],
         dataloader_drop_last=config['data']['dataloader_drop_last'],
         
+        # Data paths
+        train_data=config['data']['train_data'],
+        eval_data=config['data']['eval_data'],
+        image_base_dir=config['data']['image_base_dir'],
+        
         # LoRA settings
         use_lora=config['training']['use_lora'],
         lora_r=config['training']['lora_r'],
@@ -203,9 +186,18 @@ def create_training_config_from_unified(config: Dict[str, Any], args: Any = None
         negative_sampling_strategy=config['loss']['negative_sampling_strategy'],
         num_negatives=config['loss']['num_negatives'],
         
+        # Loss weights
+        w1_single=config['loss']['w1_single'],
+        w2_multi=config['loss']['w2_multi'],
+        w3_kl=config['loss']['w3_kl'],
+        
         # Evaluation settings
         eval_batch_size=config['evaluation']['eval_batch_size'],
         eval_max_length=config['evaluation']['eval_max_length'],
+        eval_device=config['evaluation']['eval_device'],
+        eval_data_jsonl=config['evaluation']['eval_data_jsonl'],
+        eval_model_path=config['evaluation']['eval_model_path'],
+        eval_base_model_path=config['evaluation']['eval_base_model_path'],
         
         # System settings
         seed=config['system']['seed'],
@@ -223,6 +215,34 @@ def create_training_config_from_unified(config: Dict[str, Any], args: Any = None
         report_to=config['logging']['report_to'],
         run_name=config['logging']['run_name'],
         logging_dir=config['logging']['logging_dir'],
+        
+        # WandB Configuration
+        wandb_entity=config['wandb']['entity'],
+        wandb_project=config['wandb']['project'],
+        wandb_enabled=config['wandb']['enabled'],
+        
+        # Inference Configuration
+        infer_batch_size=config['inference']['infer_batch_size'],
+        infer_device=config['inference']['infer_device'],
+        save_topk=config['inference']['save_topk'],
+        topk=config['inference']['topk'],
+        prompt_name=config['inference']['prompt_name'],
+        save_dir=config['inference']['save_dir'],
+        
+        # Runtime Configuration
+        default_run_mode=config['runtime']['default_run_mode'],
+        default_gpus=config['runtime']['default_gpus'],
+        default_num_proc=config['runtime']['default_num_proc'],
+        slurm_run_mode=config['runtime']['slurm_run_mode'],
+        slurm_gpus=config['runtime']['slurm_gpus'],
+        slurm_num_proc=config['runtime']['slurm_num_proc'],
+        slurm_partition=config['runtime']['slurm_partition'],
+        slurm_account=config['runtime']['slurm_account'],
+        slurm_nodes=config['runtime']['slurm_nodes'],
+        slurm_ntasks_per_node=config['runtime']['slurm_ntasks_per_node'],
+        slurm_gres_gpu=config['runtime']['slurm_gres_gpu'],
+        slurm_cpus_per_task=config['runtime']['slurm_cpus_per_task'],
+        slurm_time=config['runtime']['slurm_time'],
         
         # Resume training
         resume_from_checkpoint=config['resume']['resume_from_checkpoint'],
