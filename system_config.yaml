@@ -32,7 +32,7 @@ training:
   per_device_train_batch_size: 8          # Training batch size per device (8*4=32 total)
   per_device_eval_batch_size: 4           # Evaluation batch size per device
   gradient_accumulation_steps: 1          # Steps to accumulate gradients
-  learning_rate: 1e-4                     # Initial learning rate
+  learning_rate: 0.0001                     # Initial learning rate
   weight_decay: 0.01                      # Weight decay for regularization
   
   # Optimizer settings
@@ -44,7 +44,7 @@ training:
   # Learning rate scheduler
   lr_scheduler_type: "linear"             # Type of learning rate scheduler
   warmup_ratio: 0.1                       # Warmup ratio for learning rate
-  warmup_steps: 0                         # Number of warmup steps
+  warmup_steps: 100                         # Number of warmup steps
   
   # Evaluation and logging
   evaluation_strategy: "steps"            # When to run evaluation
@@ -76,8 +76,8 @@ data:
   
   # Data processing settings
   max_seq_length: 256                     # Maximum sequence length for text
-  preprocessing_num_workers: 1            # Workers for data preprocessing
-  dataloader_num_workers: 0               # Workers for data loading
+  preprocessing_num_workers: 8            # Workers for data preprocessing
+  dataloader_num_workers: 8               # Workers for data loading
   dataloader_pin_memory: true             # Pin memory for faster GPU transfer
   dataloader_drop_last: true              # Drop last incomplete batch
 
@@ -103,6 +103,11 @@ loss:
   use_simplified_contrastive: true        # Use simplified contrastive loss
   negative_sampling_strategy: "random"    # Strategy for negative sampling
   num_negatives: 7                        # Number of negative samples
+  
+  # Phase 1 Loss Weights (Pair Training)
+  w1_single: 1.0                          # Weight for single-vector InfoNCE loss
+  w2_multi: 1.0                           # Weight for multi-vector InfoNCE loss  
+  w3_kl: 1.0                              # Weight for KL divergence loss
 
 # System and Hardware Configuration
 system:
@@ -110,7 +115,7 @@ system:
   bf16: true                              # Use bfloat16 precision
   fp16: false                             # Use float16 precision (disabled when bf16=true)
   tf32: true                              # Use TensorFloat-32 on Ampere GPUs
-  gradient_checkpointing: true            # Enable gradient checkpointing to save memory
+  gradient_checkpointing: false            # Enable gradient checkpointing to save memory
   max_memory_MB: 20000                    # Maximum memory usage in MB
   
   # Random seeds
@@ -172,7 +177,7 @@ wandb:
   
 # Logging and Monitoring
 logging:
-  report_to: []                           # External reporting tools (empty = no external reporting)
+  report_to: ["wandb"]                           # External reporting tools (empty = no external reporting)
   run_name: null                          # Run name for logging (auto-generated if null)
   logging_dir: null                       # Directory for logging files
   
