@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 #SBATCH --job-name=jina
-#SBATCH --partition=normal
+#SBATCH --partition=medimgfmod
 #SBATCH --account=medimgfmod
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
